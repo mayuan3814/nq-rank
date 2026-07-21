@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#04060e">
+<title>Naomi世界排行 · NAOMI WORLD RANKING</title>
+<!--
+═══════════════════════════════════════════════════════════════════
+  Naomi世界排行 rank_board.html v3 — 单文件 H5 榜单页（本地模式零依赖全离线 / 线上模式对接 Cloudflare Worker）
+  设计: 赛博霓虹 · 量子青 #00f0ff × 霓虹粉 #ff2a8d · 游戏美术资源底图
+
+  【部署配置】部署时只需改下方「模块1 · 配置」:
+    API_BASE  默认 '' = 本地模式（mock 榜兜底）；填入 Cloudflare Worker 地址
+              （如 https://nq-rank-worker.xxx.workers.dev）→ 自动切换线上模式：
+              上榜=POST /rank，榜单=GET /rank 全服真实数据，领奖=GET /reward 服务器签发
+    ART_HERO  首屏英雄区底图（已替换为公网图床 URL，无需自建 OSS）
+
+  【与游戏端协议（逐字节一致，见 react-vite/src/data/rankData.js & cdkData.js）】
+  ① 上榜码: NQCRANK-{base64url(JSON)}-{sig16}
+     sig16 = HMAC-SHA256(CDK_SECRET, 'NQCRANK' + payload) 前16位hex大写
+     payload(v=1): { v, slotId, name, power, party:[{charId,name,level,stars,power}×3],
+       megaCount, maxEnhance, credits, gems, rank, portraitCount,
+       abyssFloor, caixiaoniao, worldWarWins, ts }
+  ② 每日礼包码: NQC-RANK_D1 / RANK_D3 / RANK_D10 / RANK_N-{8hex}-{sig16}
+     sig16 = HMAC-SHA256(CDK_SECRET, type + '-' + payload) 前16位hex大写
+  ③ 世界大战奖励码: NQC-RANK_WW-{ww2hex+6rand}-{sig16}（同上口径）
+
+  【领奖新鲜度规则（v2 新）】每个存档每次上传只能领一次:
+     上榜码 payload.ts 为该次上传时间戳；localStorage 记录每个 slotId 已领过的 ts。
+     领完后按钮锁定并提示「再次上传后可再领」——改系统日期无法刷奖，
+     只有游戏内重新生成上榜码（新 ts）才能解锁下一次领取。
+═══════════════════════════════════════════════════════════════════
+-->
+<style>
+/* ─────────── 主题变量 ─────────── */
+:root{
+  --cyan:#00f0ff; --pink:#ff2a8d; --bg:#04060e; --bg2:#0a0e1d;
+  --panel:rgba(12,17,36,.88); --line:rgba(0,240,255,.16);
+  --txt:#d7e6ff; --dim:#7a8bb0;
+  --gold:#ffd700; --silver:#c9d6e8; --bronze:#e08a4e;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  overflow:hidden;
+}
+/* 赛博网格底纹 */
+body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(0,240,255,.04) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(0,240,255,.04) 1px,transparent 1px);
+  background-size:34px 34px;
+  mask-image:linear-gradient(180deg,rgba(0,0,0,.7),rgba(0,0,0,.15));
+  -webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,.7),rgba(0,0,0,.15));}
+#app{position:relative;z-index:1;height:100dvh;max-width:560px;margin:0 auto;
+  display:flex;flex-direction:column;padding:0 12px;
+  padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+
+/* ─────────── 首屏英雄区（美术底图 + 暗角渐变） ─────────── */
+.hero{flex:none;position:relative;margin:0 -12px;padding:14px 14px 12px;overflow:hidden}
+.hero-art{position:absolute;inset:0;background-size:cover;background-position:center 22%;
+  filter:saturate(1.15);transform:scale(1.02)}
+.hero-veil{position:absolute;inset:0;
+  background:
+    radial-gradient(120% 90% at 50% 0%,transparent 30%,rgba(4,6,14,.55) 68%,var(--bg) 100%),
+    linear-gradient(180deg,rgba(4,6,14,.42) 0%,rgba(4,6,14,.30) 45%,rgba(4,6,14,.94) 100%),
+    radial-gradient(60% 50% at 12% 8%,rgba(0,240,255,.16),transparent 60%),
+    radial-gradient(55% 45% at 92% 18%,rgba(255,42,141,.16),transparent 60%)}
+.hero-inner{position:relative}
+.hero-top{display:flex;align-items:flex-start;gap:10px}
+.hero-title{flex:1;min-width:0}
+.hero-title h1{font-size:23px;letter-spacing:3px;font-weight:900;line-height:1.15;
+  background:linear-gradient(92deg,var(--cyan) 15%,#9fd8ff 45%,var(--pink) 85%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 16px rgba(0,240,255,.5))}
+.hero-title .sub{margin-top:3px;font-size:9px;letter-spacing:2.5px;color:#9db4dd;opacity:.9}
+.hero-title .live{display:inline-flex;align-items:center;margin-top:6px;font-size:9px;color:var(--cyan);
+  border:1px solid var(--line);border-radius:99px;padding:2px 9px;letter-spacing:1.5px;
+  background:rgba(4,6,14,.5);box-shadow:0 0 10px rgba(0,240,255,.15) inset}
+.hero-title .live i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--cyan);
+  margin-right:5px;box-shadow:0 0 8px var(--cyan);animation:blink 1.6s infinite}
+@keyframes blink{50%{opacity:.25}}
+/* 语言切换 */
+.langs{flex:none;display:flex;gap:4px;background:rgba(4,6,14,.55);border:1px solid var(--line);
+  border-radius:99px;padding:3px}
+.langs button{border:none;background:transparent;color:var(--dim);font-size:10px;font-weight:700;
+  padding:4px 8px;border-radius:99px;cursor:pointer;letter-spacing:1px;transition:.2s}
+.langs button.on{background:linear-gradient(135deg,var(--cyan),#4df);color:#021014;
+  box-shadow:0 0 10px rgba(0,240,255,.5)}
+
+/* 我的卡片（英雄区内） */
+.me{margin-top:10px;display:flex;align-items:center;gap:11px;
+  background:linear-gradient(120deg,rgba(255,42,141,.16),rgba(0,240,255,.10) 60%),rgba(8,12,26,.82);
+  border:1px solid rgba(255,42,141,.45);border-radius:14px;padding:10px 12px;
+  backdrop-filter:blur(8px);position:relative;overflow:hidden;
+  animation:mepulse 2.4s ease-in-out infinite}
+@keyframes mepulse{0%,100%{box-shadow:0 0 12px rgba(255,42,141,.30)}50%{box-shadow:0 0 26px rgba(255,42,141,.6)}}
+.me::before{content:"";position:absolute;top:0;left:-70%;width:45%;height:100%;
+  background:linear-gradient(100deg,transparent,rgba(255,255,255,.10),transparent);
+  transform:skewX(-18deg);animation:meshine 3.2s infinite}
+@keyframes meshine{0%{left:-70%}55%,100%{left:140%}}
+.me .medal{flex:none;width:44px;height:44px;border-radius:12px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;font-weight:900;
+  background:rgba(0,240,255,.08);border:1px solid var(--line);color:var(--cyan)}
+.me .medal .r{font-size:17px;line-height:1}
+.me .medal .k{font-size:7px;letter-spacing:1px;color:var(--dim);margin-top:2px}
+.me .meinfo{flex:1;min-width:0}
+.me .menm{font-size:14px;font-weight:800;letter-spacing:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.me .memeta{font-size:10px;color:var(--dim);margin-top:3px;letter-spacing:.5px}
+.me .memeta b{color:var(--cyan);font-weight:700}
+.me .mestate{flex:none;font-size:9px;letter-spacing:1px;padding:4px 9px;border-radius:99px;border:1px solid}
+.mestate.can{color:#3dffa8;border-color:rgba(61,255,168,.5);text-shadow:0 0 8px rgba(61,255,168,.6)}
+.mestate.done{color:var(--dim);border-color:rgba(122,139,176,.35)}
+.me.empty{justify-content:center;text-align:center;color:var(--dim);font-size:11px;letter-spacing:1px;
+  border-style:dashed;animation:none;line-height:1.7}
+
+/* 上榜码输入行（英雄区底部） */
+.code-row{display:flex;gap:8px;margin-top:10px}
+.code-row input{flex:1;min-width:0;background:rgba(3,5,12,.72);border:1px solid var(--line);
+  border-radius:11px;color:var(--cyan);padding:10px 12px;font-size:11px;outline:none;
+  font-family:ui-monospace,Menlo,monospace;transition:.2s;backdrop-filter:blur(6px)}
+.code-row input:focus{border-color:var(--cyan);box-shadow:0 0 12px rgba(0,240,255,.3)}
+.code-row input::placeholder{color:#43507a;font-family:inherit}
+.btn{border:none;border-radius:11px;padding:0 15px;font-size:12px;font-weight:800;
+  letter-spacing:2px;color:#021014;cursor:pointer;white-space:nowrap;
+  background:linear-gradient(135deg,var(--cyan),#4df);
+  box-shadow:0 0 14px rgba(0,240,255,.4);transition:.15s}
+.btn:active{transform:scale(.95)}
+.btn.pink{background:linear-gradient(135deg,var(--pink),#ff7ab8);color:#1a0210;
+  box-shadow:0 0 14px rgba(255,42,141,.45)}
+.btn.ghost{background:transparent;color:var(--cyan);border:1px solid var(--line);box-shadow:none}
+.btn[disabled]{opacity:.4;pointer-events:none}
+.codemsg{margin-top:6px;font-size:11px;min-height:14px;letter-spacing:.5px;position:relative}
+.codemsg.ok{color:#3dffa8;text-shadow:0 0 8px rgba(61,255,168,.6)}
+.codemsg.err{color:#ff5d7a;text-shadow:0 0 8px rgba(255,93,122,.6)}
+.demo-link{display:inline-block;margin-top:2px;font-size:9px;color:#43507a;text-decoration:underline;cursor:pointer;position:relative}
+
+/* ─────────── 分榜 Tab ─────────── */
+.tabs{flex:none;display:flex;gap:8px;margin-top:12px}
+.tabs button{flex:1;background:rgba(10,14,29,.82);border:1px solid var(--line);color:var(--dim);
+  border-radius:12px;padding:9px 0 8px;font-size:13px;letter-spacing:2px;cursor:pointer;transition:.2s;font-weight:600}
+.tabs button.on{color:var(--cyan);border-color:var(--cyan);
+  box-shadow:0 0 16px rgba(0,240,255,.28),inset 0 0 12px rgba(0,240,255,.08);font-weight:800}
+.tabs button small{display:block;font-size:8px;letter-spacing:1px;margin-top:2px;opacity:.7;font-weight:400}
+
+/* ─────────── 榜单磁吸滚动区 ─────────── */
+.board{flex:1;min-height:0;margin-top:10px;overflow-y:auto;border-radius:12px;
+  scroll-snap-type:y proximity;-webkit-overflow-scrolling:touch;
+  scrollbar-width:thin;scrollbar-color:var(--cyan) transparent;padding-bottom:76px}
+.board::-webkit-scrollbar{width:4px}
+.board::-webkit-scrollbar-thumb{background:rgba(0,240,255,.35);border-radius:4px}
+.card{scroll-snap-align:start;display:flex;align-items:center;gap:10px;
+  background:var(--panel);border:1px solid rgba(0,240,255,.10);border-radius:12px;
+  padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:.2s;position:relative;overflow:hidden}
+.card:active{transform:scale(.985)}
+.card .rank-badge{flex:none;width:36px;height:36px;border-radius:10px;display:flex;
+  align-items:center;justify-content:center;font-weight:900;font-size:14px;
+  background:rgba(255,255,255,.05);color:var(--dim);border:1px solid rgba(255,255,255,.08)}
+/* 前三 金/银/铜 流光 */
+.card.top1 .rank-badge,.card.top2 .rank-badge,.card.top3 .rank-badge{color:#1a1000;border:none;position:relative;overflow:hidden}
+.card.top1 .rank-badge{background:linear-gradient(135deg,#fff3b0,var(--gold) 45%,#b8860b)}
+.card.top2 .rank-badge{background:linear-gradient(135deg,#fff,var(--silver) 45%,#7c8aa0)}
+.card.top3 .rank-badge{background:linear-gradient(135deg,#ffd7b0,var(--bronze) 45%,#8a4a1f)}
+.card.top1 .rank-badge::after,.card.top2 .rank-badge::after,.card.top3 .rank-badge::after{
+  content:"";position:absolute;top:-60%;left:-80%;width:50%;height:220%;
+  background:linear-gradient(105deg,transparent,rgba(255,255,255,.85),transparent);
+  transform:rotate(20deg);animation:shine 2.4s infinite}
+.card.top2 .rank-badge::after{animation-delay:.5s}
+.card.top3 .rank-badge::after{animation-delay:1s}
+@keyframes shine{0%{left:-80%}60%,100%{left:160%}}
+.card.top10{border-color:rgba(0,240,255,.45);box-shadow:0 0 12px rgba(0,240,255,.18),inset 0 0 18px rgba(0,240,255,.05)}
+.card.top1{border-color:rgba(255,215,0,.55);box-shadow:0 0 16px rgba(255,215,0,.25)}
+.card .info{flex:1;min-width:0}
+.card .nm{font-size:13px;font-weight:700;letter-spacing:.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .nm .idtag{font-size:9px;color:var(--pink);font-weight:400}
+.card .meta{font-size:9px;color:var(--dim);margin-top:3px;letter-spacing:.5px}
+.card .meta b{color:var(--cyan);font-weight:600}
+.card .pw{flex:none;text-align:right}
+.card .pw .v{font-size:17px;font-weight:900;letter-spacing:.5px;font-family:ui-monospace,Menlo,monospace}
+.card .pw .lb{font-size:8px;color:var(--dim);letter-spacing:2px}
+/* 战力 9 档配色（powerData.js QUANTUM_TIERS 移植） */
+.pw0{color:#67e8f9}.pw1{color:#22d3ee}.pw2{color:#60a5fa}.pw3{color:#818cf8}
+.pw4{color:#a78bfa;text-shadow:0 0 10px rgba(167,139,250,.5)}
+.pw5{color:#ffd700;text-shadow:0 0 10px rgba(255,215,0,.5)}
+.pw6{color:#fbbf24;text-shadow:0 0 12px rgba(251,191,36,.55)}
+.pw7,.pw8{background:linear-gradient(92deg,#ffd76a,#ff8c1a 45%,#ff4500);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 8px rgba(255,120,20,.6));animation:burn 1.8s ease-in-out infinite}
+.pw8{filter:drop-shadow(0 0 12px rgba(255,69,0,.8))}
+@keyframes burn{50%{filter:drop-shadow(0 0 16px rgba(255,100,10,.9))}}
+/* 我的条目在榜内高亮 */
+.card.me-hl{border-color:var(--pink)}
+.card.me-hl::before{content:"MY";position:absolute;top:0;right:0;font-size:8px;letter-spacing:1px;
+  background:var(--pink);color:#1a0210;padding:2px 8px;border-radius:0 10px 0 8px;font-weight:900}
+
+/* 展开详情 */
+.detail{margin:-4px 0 10px;background:rgba(6,9,20,.94);border:1px solid rgba(0,240,255,.22);
+  border-top:none;border-radius:0 0 12px 12px;padding:12px;animation:drop .25s ease}
+@keyframes drop{from{opacity:0;transform:translateY(-8px)}}
+.chars{display:flex;gap:8px}
+.char{flex:1;text-align:center;background:rgba(0,240,255,.05);border:1px solid rgba(0,240,255,.12);
+  border-radius:10px;padding:8px 4px}
+.char .av{width:50px;height:50px;margin:0 auto 6px;border-radius:10px;overflow:hidden;
+  border:1px solid rgba(0,240,255,.3);box-shadow:0 0 10px rgba(0,240,255,.15);
+  display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:#021014}
+.char .av img{width:100%;height:100%;object-fit:cover;display:block}
+.char .cn{font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.char .cs{font-size:9px;color:var(--gold);letter-spacing:1px;margin-top:2px}
+.char .cp{font-size:9px;color:var(--cyan);margin-top:2px;font-family:ui-monospace,Menlo,monospace}
+.dgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
+.dgrid .cell{background:rgba(255,42,141,.05);border:1px solid rgba(255,42,141,.12);
+  border-radius:8px;padding:6px 4px;text-align:center}
+.dgrid .k{font-size:8px;color:var(--dim);letter-spacing:.5px}
+.dgrid .v{font-size:11px;font-weight:700;color:var(--txt);margin-top:2px;font-family:ui-monospace,Menlo,monospace}
+.dgrid .v.hl{color:var(--pink)}
+
+/* 世界大战战报卡（WW Tab 顶部） */
+.ww-report{scroll-snap-align:start;background:linear-gradient(120deg,rgba(255,42,141,.14),rgba(6,9,20,.94));
+  border:1px solid rgba(255,42,141,.35);border-radius:12px;padding:12px;margin-bottom:10px}
+.ww-report .wt{font-size:11px;letter-spacing:2px;color:var(--pink);font-weight:800;display:flex;align-items:center;gap:7px}
+.ww-report .wt::before{content:"";width:7px;height:7px;background:var(--pink);box-shadow:0 0 8px var(--pink);transform:rotate(45deg)}
+.ww-champ{display:flex;align-items:center;gap:10px;margin-top:9px}
+.ww-champ .crown{font-size:22px;filter:drop-shadow(0 0 8px var(--gold))}
+.ww-champ .who{font-size:13px;font-weight:800}
+.ww-champ .sub2{font-size:9px;color:var(--dim);margin-top:2px}
+.ww-code{margin-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:10px;color:var(--cyan);
+  word-break:break-all;background:rgba(0,0,0,.5);border:1px dashed rgba(0,240,255,.4);
+  border-radius:8px;padding:8px 10px;letter-spacing:.5px}
+.ww-hint{margin-top:7px;font-size:9px;color:var(--gold);letter-spacing:1px}
+
+/* 空态 / 骨架 */
+.empty{text-align:center;padding:26px 20px;border:1px dashed rgba(0,240,255,.3);border-radius:14px;margin-bottom:10px;
+  background:rgba(8,12,26,.6)}
+.empty .ico{font-size:30px;filter:drop-shadow(0 0 12px var(--cyan))}
+.empty .p1{margin-top:8px;font-size:13px;color:var(--cyan);letter-spacing:2px}
+.empty .p2{margin-top:5px;font-size:10px;color:var(--dim);line-height:1.8}
+.skel{display:flex;gap:10px;align-items:center;padding:11px 12px;margin-bottom:8px;
+  background:var(--panel);border-radius:12px;border:1px solid rgba(0,240,255,.06)}
+.skel i{display:block;border-radius:8px;background:linear-gradient(90deg,rgba(255,255,255,.05),rgba(255,255,255,.12),rgba(255,255,255,.05));
+  background-size:200% 100%;animation:sk 1.2s infinite}
+@keyframes sk{to{background-position:-200% 0}}
+.board-foot{text-align:center;font-size:9px;color:#43507a;letter-spacing:1px;padding:6px 0 4px}
+
+/* ─────────── 每日礼包悬浮卡 ─────────── */
+.fab{position:fixed;right:16px;bottom:calc(18px + env(safe-area-inset-bottom));z-index:40;
+  width:54px;height:54px;border-radius:50%;border:1px solid rgba(255,215,0,.55);cursor:pointer;
+  background:radial-gradient(circle at 32% 28%,rgba(255,215,0,.28),rgba(10,14,29,.95) 65%);
+  box-shadow:0 0 20px rgba(255,215,0,.35),0 8px 24px rgba(0,0,0,.5);
+  font-size:23px;display:flex;align-items:center;justify-content:center;transition:.2s;
+  animation:fabfloat 3s ease-in-out infinite}
+.fab:active{transform:scale(.92)}
+.fab .dot{position:absolute;top:2px;right:2px;width:11px;height:11px;border-radius:50%;
+  background:var(--pink);box-shadow:0 0 8px var(--pink);border:2px solid var(--bg)}
+@keyframes fabfloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+.sheet-mask{position:fixed;inset:0;z-index:49;background:rgba(2,4,10,.6);backdrop-filter:blur(2px);
+  opacity:0;pointer-events:none;transition:.25s}
+.sheet-mask.open{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:50%;bottom:0;transform:translateX(-50%) translateY(105%);z-index:50;
+  width:100%;max-width:536px;background:linear-gradient(180deg,#0d1226,#070a18);
+  border:1px solid rgba(255,215,0,.35);border-bottom:none;border-radius:20px 20px 0 0;
+  padding:16px 16px calc(18px + env(safe-area-inset-bottom));transition:transform .3s cubic-bezier(.2,.9,.3,1);
+  box-shadow:0 -10px 40px rgba(0,0,0,.6),0 0 30px rgba(255,215,0,.12)}
+.sheet.open{transform:translateX(-50%) translateY(0)}
+.sheet .grab{width:38px;height:4px;border-radius:99px;background:rgba(255,255,255,.18);margin:0 auto 12px}
+.sheet h3{font-size:13px;letter-spacing:2px;color:var(--gold);display:flex;align-items:center;gap:8px}
+.sheet h3::before{content:"";width:8px;height:8px;background:var(--gold);box-shadow:0 0 8px var(--gold);transform:rotate(45deg)}
+.sheet h3 .cls{margin-left:auto;font-size:14px;color:var(--dim);cursor:pointer;border:none;background:none;padding:4px}
+.gift-tier{display:flex;justify-content:space-between;align-items:center;gap:10px;
+  background:rgba(255,215,0,.06);border:1px solid rgba(255,215,0,.22);border-radius:12px;padding:11px 12px;margin-top:11px}
+.gift-tier .t{font-size:11px;color:var(--gold);letter-spacing:1px}
+.gift-tier .r{font-size:13px;font-weight:800;color:#fff;margin-top:3px}
+.giftcode{margin-top:11px;display:none}
+.giftcode .code{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--cyan);
+  word-break:break-all;background:rgba(0,0,0,.5);border:1px dashed rgba(0,240,255,.4);
+  border-radius:9px;padding:10px 11px;letter-spacing:.5px}
+.giftcode .row{display:flex;gap:8px;margin-top:9px;align-items:center}
+.giftcode .hint{font-size:9px;color:var(--dim);letter-spacing:.5px;line-height:1.6}
+.gift-done{margin-top:10px;font-size:11px;color:#3dffa8;letter-spacing:.5px;display:none;line-height:1.7}
+.gift-done .re{display:block;color:var(--dim);font-size:9px;margin-top:2px}
+.gift-none{margin-top:11px;font-size:11px;color:var(--dim);text-align:center;padding:14px 10px;
+  border:1px dashed rgba(122,139,176,.3);border-radius:10px;line-height:1.8}
+
+/* Toast */
+#toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%) translateY(20px);
+  background:rgba(6,10,22,.95);border:1px solid var(--cyan);color:var(--cyan);
+  padding:10px 22px;border-radius:99px;font-size:12px;letter-spacing:1.5px;opacity:0;
+  pointer-events:none;transition:.3s;z-index:99;box-shadow:0 0 20px rgba(0,240,255,.35);max-width:86vw;text-align:center}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ═══ 首屏英雄区：美术底图 + 标题 + 语言 + 我的卡片 + 上榜码 ═══ -->
+  <header class="hero">
+    <div class="hero-art" id="heroArt"></div>
+    <div class="hero-veil"></div>
+    <div class="hero-inner">
+      <div class="hero-top">
+        <div class="hero-title">
+          <h1 id="uiTitle">Naomi世界排行</h1>
+          <div class="sub" id="uiSub">NAOMI QUANTUM CHRONICLE · WORLD RANKING</div>
+          <div class="live"><i></i><span id="uiLive">OFFLINE LEAGUE · SEASON ∞</span></div>
+        </div>
+        <div class="langs" id="langBox">
+          <button data-lang="zh">中</button><button data-lang="ja">日</button><button data-lang="en">EN</button>
+        </div>
+      </div>
+      <div class="me empty" id="meCard"></div>
+      <div class="code-row">
+        <input id="codeInput" autocomplete="off" spellcheck="false">
+        <button class="btn" id="codeBtn"></button>
+      </div>
+      <div class="codemsg" id="codeMsg"></div>
+      <span class="demo-link" id="demoLink"></span>
+    </div>
+  </header>
+
+  <!-- ═══ 分榜 Tab ═══ -->
+  <nav class="tabs">
+    <button class="on" data-tab="power"><span class="tt" data-tt="tabPower"></span><small>POWER</small></button>
+    <button data-tab="boss"><span class="tt" data-tt="tabBoss"></span><small>ABYSS</small></button>
+    <button data-tab="ww"><span class="tt" data-tt="tabWw"></span><small>WAR</small></button>
+  </nav>
+
+  <!-- ═══ 榜单（磁吸滚动） ═══ -->
+  <main class="board" id="board"></main>
+</div>
+
+<!-- ═══ 每日礼包悬浮卡 ═══ -->
+<button class="fab" id="giftFab">🎁<span class="dot" id="giftDot" style="display:none"></span></button>
+<div class="sheet-mask" id="sheetMask"></div>
+<div class="sheet" id="giftSheet">
+  <div class="grab"></div>
+  <h3><span id="uiGiftTitle"></span><button class="cls" id="sheetClose">✕</button></h3>
+  <div id="giftBody"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* ═══════════════════════════════════════════════════════════════
+   模块 0 · 纯 JS SHA-256 / HMAC-SHA256（与游戏端 cdkData.js 逐字节一致）
+   ═══════════════════════════════════════════════════════════════ */
+const CDK_SECRET_HEX = '5db9fc26b72aa6f23ff06c0b885329a6d879439c29279f1f9d6125f602c78407';
+
+function sha256Hex(ascii) {
+  function rightRotate(value, amount) { return (value >>> amount) | (value << (32 - amount)); }
+  const mathPow = Math.pow, maxWord = mathPow(2, 32);
+  let i, j, result = '';
+  const words = [];
+  const asciiBitLength = ascii.length * 8;
+  let hash = sha256Hex.h = sha256Hex.h || [];
+  const k = sha256Hex.k = sha256Hex.k || [];
+  let primeCounter = k.length;
+  const isComposite = {};
+  for (let candidate = 2; primeCounter < 64; candidate++) {
+    if (!isComposite[candidate]) {
+      for (i = 0; i < 313; i += candidate) isComposite[i] = candidate;
+      hash[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
+      k[primeCounter++] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+    }
+  }
+  ascii += '\x80';
+  while (ascii.length % 64 - 56) ascii += '\x00';
+  for (let i = 0; i < ascii.length; i++) {
+    j = ascii.charCodeAt(i);
+    if (j >> 8) return '';
+    words[i >> 2] |= j << ((3 - i) % 4) * 8;
+  }
+  words[words.length] = (asciiBitLength / maxWord) | 0;
+  words[words.length] = asciiBitLength;
+  for (j = 0; j < words.length;) {
+    const w = words.slice(j, j += 16);
+    const oldHash = hash;
+    hash = hash.slice(0, 8);
+    for (i = 0; i < 64; i++) {
+      const w15 = w[i - 15], w2 = w[i - 2];
+      const a = hash[0], e = hash[4];
+      const temp1 = hash[7]
+        + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25))
+        + ((e & hash[5]) ^ ((~e) & hash[6])) + k[i]
+        + (w[i] = (i < 16) ? w[i] : (
+          w[i - 16]
+          + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3))
+          + w[i - 7]
+          + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))) | 0);
+      const temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22))
+        + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+      hash = [(temp1 + temp2) | 0].concat(hash);
+      hash[4] = (hash[4] + temp1) | 0;
+    }
+    for (i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
+  }
+  for (i = 0; i < 8; i++) {
+    for (j = 3; j + 1; j--) {
+      const b = (hash[i] >> (j * 8)) & 255;
+      result += ((b >> 4).toString(16)) + ((b & 15).toString(16));
+    }
+  }
+  return result;
+}
+function hexToBytes(hex) { const o = []; for (let i = 0; i < hex.length; i += 2) o.push(parseInt(hex.substr(i, 2), 16)); return o; }
+function bytesToBinaryString(b) { return b.map(x => String.fromCharCode(x)).join(''); }
+function hexToBinaryString(hex) { return bytesToBinaryString(hexToBytes(hex)); }
+function hmacSha256Hex(keyHex, message) { // RFC 2104
+  const BLOCK = 64;
+  let key = hexToBytes(keyHex);
+  if (key.length > BLOCK) key = hexToBytes(sha256Hex(bytesToBinaryString(key)));
+  while (key.length < BLOCK) key.push(0);
+  const ipad = key.map(b => b ^ 0x36), opad = key.map(b => b ^ 0x5c);
+  const innerHex = sha256Hex(bytesToBinaryString(ipad) + message);
+  return sha256Hex(bytesToBinaryString(opad) + hexToBinaryString(innerHex));
+}
+/** HMAC 截断前16位hex大写（与 signCdk / signRankCode 同口径） */
+function sign16(msg) { return hmacSha256Hex(CDK_SECRET_HEX, msg).slice(0, 16).toUpperCase(); }
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 1 · 配置（★ 部署时改这里 ★）
+   ═══════════════════════════════════════════════════════════════ */
+/** ★★ 线上后端：填入你的 Cloudflare Worker 地址（结尾不带 /）即自动切换线上模式；留空 = 本地模式 ★★ */
+const API_BASE = ''; // 例: 'https://nq-rank-worker.你的账号.workers.dev'
+const ONLINE = !!API_BASE;
+
+/** 美术资源（已替换为公网图床 URL，无需自建 OSS；本地开发可改回相对路径） */
+const ART_BASE = '/images/art_v2/';
+const ART_HERO = 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Ff9f2267b3d527b46ddd8a95d912beda116a9a1b7065f6b08636dfae6a699e049?filename=splash_jeff_farewell.webp&sig=vo27FBcs3ekAzJV4ZQjXjawKoE0HSasAeyNL1drlIy0=&t=o';
+const ART_HERO_FALLBACK = 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F42b1d1b9a58f6d5da16afec74ffe7ac70324252417547f21278588a4f4aa1a8c?filename=naomi_full.webp&sig=6M_B-FqqN_eKfKbYFom8Cx7WKls-n4VxomwajSPvfLU=&t=o';
+const AVATAR_BASE = ART_BASE + 'characters/';
+const AVATAR_SUFFIX = '_avatar.webp';
+
+/** 战力 9 档（powerData.js QUANTUM_TIERS 移植 → CSS 类 pw0..pw8） */
+const POWER_TIER_MINS = [0, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000];
+function powerTier(v) {
+  for (let i = POWER_TIER_MINS.length - 1; i >= 0; i--) if (v >= POWER_TIER_MINS[i]) return i;
+  return 0;
+}
+/** 每日礼包档位（rankData.js RANK_DAILY_TIERS 同口径） */
+const GIFT_TIERS = [
+  { maxRank: 1,        type: 'RANK_D1',  gems: 50, credits: 50000 },
+  { maxRank: 3,        type: 'RANK_D3',  gems: 30, credits: 30000 },
+  { maxRank: 10,       type: 'RANK_D10', gems: 15, credits: 10000 },
+  { maxRank: Infinity, type: 'RANK_N',   gems: 5,  credits: 5000  },
+];
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 2 · i18n（中/日/英，默认中文，全部文案走字典）
+   ═══════════════════════════════════════════════════════════════ */
+const I18N = {
+  zh: {
+    title: 'Naomi世界排行', sub: 'NAOMI QUANTUM CHRONICLE · WORLD RANKING',
+    live: 'OFFLINE LEAGUE · 赛季 ∞',
+    liveOnline: 'ONLINE LEAGUE · 全球实时榜', netErr: '网络异常 · 稍后自动重试',
+    emptyTitleOnline: '虚位以待', emptySubOnline: '全服榜单暂无人上榜<br>粘贴上榜码，成为全服第一人',
+    codeOkOnline: n => `✓ 上榜成功 · ${n} 已杀入全服榜`,
+    tabPower: '总榜', tabBoss: '世界BOSS', tabWw: '世界大战',
+    codePh: '粘贴 NQCRANK- 上榜码…', codeBtn: '上榜',
+    codeOk: n => `✓ 上榜成功 · ${n} 已杀入榜单`,
+    codeErrFormat: '✕ 编码无效（格式错误）', codeErrSig: '✕ 编码无效（验签失败）', codeErrPayload: '✕ 编码无效（数据残缺）',
+    codeErrStale: '✕ 上榜码已过期（超10分钟），请回游戏重新生成',
+    demo: '生成演示码（本地测试用）', demoOk: '演示码已填入，点击「上榜」',
+    meEmpty: '尚未上榜<br>粘贴游戏内生成的上榜码，杀入世界排行',
+    meRank: '总榜名次', mePower: '战力', meFloor: '塔', meWins: '大战',
+    canClaim: '可领奖', claimed: '已领取',
+    giftTitle: '每日礼包 · DAILY GIFT',
+    giftTier: r => `当前总榜第 ${r} 名`,
+    tierName: { RANK_D1: '第 1 名 · 王者档', RANK_D3: '前 3 名 · 传说档', RANK_D10: '前 10 名 · 精英档', RANK_N: '参榜 · 慰劳档' },
+    giftReward: t => `💎 ${t.gems} 钻 + 🪙 ${t.credits.toLocaleString('en-US')} 金币`,
+    giftClaimBtn: '生成奖励码', giftCopy: '一键复制', giftCopied: '已复制 · 回游戏内兑换',
+    giftHint: '回游戏内兑换 · 与本次上榜绑定',
+    giftDone: '✓ 本次上传的奖励已领取',
+    giftReupload: '再次上传上榜码后可再领（游戏内重新生成即刷新）',
+    giftNone: '上榜后即可按名次领取每日礼包<br>名次越高，奖励越豪华',
+    giftGenOk: '奖励码已生成',
+    emptyTitle: '先放你的码吧', emptySub: '游戏内生成 NQCRANK 上榜码<br>粘贴到顶部输入框即可杀入榜单',
+    boardFoot: (n, k) => `共 ${n} 名选手 · 按${k}排序 · 每日种子榜单`,
+    sortPower: '量子综合战力', sortBoss: '深渊塔层数', sortWw: '世界大战胜场',
+    lbPower: 'POWER', lbFloor: 'ABYSS', lbWins: 'WINS',
+    metaPower: (r, f, w) => `战力 <b>${r}</b> · 塔 <b>${f}F</b> · 大战 <b>${w}胜</b>`,
+    metaOther: (p, r) => `战力 <b>${p}</b> · 名次 <b>${r}</b>`,
+    dMega: 'MEGA装备', dEnh: '最高强化', dCredits: '金币', dGems: '钻石',
+    dRank: '榜内名次', dPort: '立绘解锁', dFloor: '塔层数', dCxN: '菜小鸟',
+    cxnYes: '已击破', cxnNo: '未击破', unitJian: '件', unitF: 'F', unitWin: '胜',
+    noParty: '无角色数据',
+    wwTitle: '世界大战 · 昨日战报', wwChamp: n => `冠军 ${n}`,
+    wwYou: (r, t) => `你的名次: 第 ${r} / ${t} 名`, wwYouOut: '未上榜 · 上榜后真人参战',
+    wwReward: '夺冠奖励码（解锁称号「末日幸存者」）',
+    wwBefore: '昨日战场每日 12:00 结算，稍后再来',
+    wwNeed: '上榜并夺冠后，此处发放专属奖励码',
+    uploadedAt: '上传于',
+  },
+  ja: {
+    title: 'ナオミ世界ランキング', sub: 'NAOMI QUANTUM CHRONICLE · WORLD RANKING',
+    live: 'OFFLINE LEAGUE · シーズン ∞',
+    liveOnline: 'ONLINE LEAGUE · グローバル实时榜', netErr: '通信エラー · 後ほど再試行',
+    emptyTitleOnline: '虚位以待', emptySubOnline: '全サーバーの榜はまだ空です<br>コードを貼って最初の覇者になろう',
+    codeOkOnline: n => `✓ ランクイン · ${n} が全服榜に参戦`,
+    tabPower: '総合榜', tabBoss: 'ワールドボス', tabWw: '世界大戦',
+    codePh: 'NQCRANK- コードを貼り付け…', codeBtn: '登録',
+    codeOk: n => `✓ ランクイン · ${n} が参戦`,
+    codeErrFormat: '✕ 無効なコード（形式エラー）', codeErrSig: '✕ 無効なコード（署名エラー）', codeErrPayload: '✕ 無効なコード（データ不足）',
+    codeErrStale: '✕ コード期限切れ（10分経過）・ゲーム内で再生成を',
+    demo: 'デモコード生成（テスト用）', demoOk: 'デモコード入力済み・「登録」をタップ',
+    meEmpty: '未ランクイン<br>ゲーム内のコードを貼って参戦しよう',
+    meRank: '総合順位', mePower: '戦力', meFloor: '塔', meWins: '大戦',
+    canClaim: '受取可', claimed: '受取済',
+    giftTitle: 'デイリーギフト · DAILY GIFT',
+    giftTier: r => `現在の総合順位 ${r} 位`,
+    tierName: { RANK_D1: '1位 · 王者', RANK_D3: '3位以内 · 伝説', RANK_D10: '10位以内 · エリート', RANK_N: '参加 · 慰労' },
+    giftReward: t => `💎 ${t.gems} ジェム + 🪙 ${t.credits.toLocaleString('en-US')} ゴールド`,
+    giftClaimBtn: '報酬コード生成', giftCopy: 'コピー', giftCopied: 'コピー済 · ゲーム内で交換',
+    giftHint: 'ゲーム内で交換 · 今回の登録と紐付け',
+    giftDone: '✓ 今回のアップロード分は受取済み',
+    giftReupload: '再アップロードで再度受取可能（ゲーム内で再生成）',
+    giftNone: 'ランクインすると順位に応じたギフトが貰える<br>上位ほど豪華に',
+    giftGenOk: '報酬コードを生成しました',
+    emptyTitle: 'まずコードを貼ろう', emptySub: 'ゲーム内で NQCRANK コードを生成<br>上の入力欄に貼るだけで参戦',
+    boardFoot: (n, k) => `${n} 名参戦 · ${k}順 · デイリーシード榜`,
+    sortPower: '量子総合戦力', sortBoss: '深淵塔の階数', sortWw: '世界大戦の勝数',
+    lbPower: 'POWER', lbFloor: 'ABYSS', lbWins: 'WINS',
+    metaPower: (r, f, w) => `戦力 <b>${r}</b> · 塔 <b>${f}F</b> · 大戦 <b>${w}勝</b>`,
+    metaOther: (p, r) => `戦力 <b>${p}</b> · 順位 <b>${r}</b>`,
+    dMega: 'MEGA装備', dEnh: '最大強化', dCredits: 'ゴールド', dGems: 'ジェム',
+    dRank: '榜内順位', dPort: '立絵解放', dFloor: '塔の階数', dCxN: '菜小鳥',
+    cxnYes: '撃破済', cxnNo: '未撃破', unitJian: '個', unitF: 'F', unitWin: '勝',
+    noParty: 'キャラデータなし',
+    wwTitle: '世界大戦 · 昨日の戦報', wwChamp: n => `覇者 ${n}`,
+    wwYou: (r, t) => `あなたの順位: ${r} / ${t} 位`, wwYouOut: '未参戦 · 登録後に参戦',
+    wwReward: '優勝報酬コード（称号「末日の生存者」解放）',
+    wwBefore: '昨日分は毎日 12:00 に確定、しばらくお待ちを',
+    wwNeed: '参戦して優勝すると専用コードを配布',
+    uploadedAt: 'アップロード',
+  },
+  en: {
+    title: 'Naomi World Ranking', sub: 'NAOMI QUANTUM CHRONICLE · WORLD RANKING',
+    live: 'OFFLINE LEAGUE · SEASON ∞',
+    liveOnline: 'ONLINE LEAGUE · GLOBAL LIVE', netErr: 'Network error · will retry',
+    emptyTitleOnline: 'Awaiting Challengers', emptySubOnline: 'The global board is empty<br>Paste your code and become the first legend',
+    codeOkOnline: n => `✓ Ranked! ${n} enters the global board`,
+    tabPower: 'Overall', tabBoss: 'World Boss', tabWw: 'World War',
+    codePh: 'Paste NQCRANK- code…', codeBtn: 'ENTER',
+    codeOk: n => `✓ Ranked! ${n} enters the board`,
+    codeErrFormat: '✕ Invalid code (format)', codeErrSig: '✕ Invalid code (signature)', codeErrPayload: '✕ Invalid code (payload)',
+    codeErrStale: '✕ Code expired (>10 min) · regenerate in game',
+    demo: 'Generate demo code (local test)', demoOk: 'Demo code filled · tap ENTER',
+    meEmpty: 'Not ranked yet<br>Paste your in-game code to enter the world ranking',
+    meRank: 'Overall Rank', mePower: 'Power', meFloor: 'Tower', meWins: 'War',
+    canClaim: 'CLAIM', claimed: 'CLAIMED',
+    giftTitle: 'Daily Gift · DAILY GIFT',
+    giftTier: r => `Current overall rank #${r}`,
+    tierName: { RANK_D1: '#1 · King Tier', RANK_D3: 'Top 3 · Legend', RANK_D10: 'Top 10 · Elite', RANK_N: 'Entry · Consolation' },
+    giftReward: t => `💎 ${t.gems} Gems + 🪙 ${t.credits.toLocaleString('en-US')} Credits`,
+    giftClaimBtn: 'Generate Code', giftCopy: 'Copy', giftCopied: 'Copied · redeem in game',
+    giftHint: 'Redeem in game · bound to this upload',
+    giftDone: '✓ Reward for this upload claimed',
+    giftReupload: 'Re-upload your rank code to claim again (regenerate in game)',
+    giftNone: 'Enter the board to claim a daily gift by rank<br>Higher rank, better loot',
+    giftGenOk: 'Reward code generated',
+    emptyTitle: 'Drop your code first', emptySub: 'Generate an NQCRANK code in game<br>and paste it above to enter the board',
+    boardFoot: (n, k) => `${n} contenders · sorted by ${k} · daily seed board`,
+    sortPower: 'quantum power', sortBoss: 'abyss floor', sortWw: 'war wins',
+    lbPower: 'POWER', lbFloor: 'ABYSS', lbWins: 'WINS',
+    metaPower: (r, f, w) => `PWR <b>${r}</b> · Tower <b>${f}F</b> · War <b>${w}W</b>`,
+    metaOther: (p, r) => `PWR <b>${p}</b> · Rank <b>${r}</b>`,
+    dMega: 'MEGA Gear', dEnh: 'Max Enhance', dCredits: 'Credits', dGems: 'Gems',
+    dRank: 'Board Rank', dPort: 'Portraits', dFloor: 'Tower', dCxN: 'CaiXiaoNiao',
+    cxnYes: 'Defeated', cxnNo: 'Alive', unitJian: '', unitF: 'F', unitWin: 'W',
+    noParty: 'No party data',
+    wwTitle: 'World War · Yesterday\'s Report', wwChamp: n => `Champion ${n}`,
+    wwYou: (r, t) => `Your rank: #${r} / ${t}`, wwYouOut: 'Not entered · rank up to join',
+    wwReward: 'Champion code (unlocks title "Last Survivor")',
+    wwBefore: 'Yesterday\'s war settles at 12:00 daily',
+    wwNeed: 'Enter and win to receive an exclusive code',
+    uploadedAt: 'Uploaded',
+  },
+};
+const LS_LANG = 'nqrank_lang';
+let LANG = (() => { try { const l = localStorage.getItem(LS_LANG); return I18N[l] ? l : 'zh'; } catch { return 'zh'; } })();
+const t = k => I18N[LANG][k];
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 3 · 种子随机（每日稳定）
+   ═══════════════════════════════════════════════════════════════ */
+function hashStr(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let x = Math.imul(a ^ (a >>> 15), 1 | a);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const ri = (rng, min, max) => min + Math.floor(rng() * (max - min + 1));
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 4 · Mock 50 人（中/日/英 ≈ 4:3:3，每日种子稳定）
+   ═══════════════════════════════════════════════════════════════ */
+const NAMES_ZH = ['夜枭速递','量子游侠','星尘配送员','苍穹老司机','虚空跑单人','霓虹镖师','幻影急便','磁暴车队长','深空信使','零点押运','数据海拾荒者','红移补给线','白夜快递员','暗物质镖客','重力井摆渡人','轨道掷弹手','极光押送','黑洞外卖员','星门看守','折跃点蹲哥']; // 20
+const NAMES_JA = ['瞬きの星','月面宅配便','量子貓又','零号倉庫番','終末配達記録','桜吹雪急便','電脳行商人','銀河運び屋','星屑配達員','深夜便パイロット','光子郵便屋','軌道の旅人','電光配達娘','虚空航路士','流星トラッカー']; // 15
+const NAMES_EN = ['Kuro_Neko','OverDrive_Rin','Nova_Runner','Ghost_Protocol','Warp_Love','Blaze_Heart','NeonVoyager','CyberDusk','QuantumFox','Starlight_07','ZeroG_Rider','PulseHunter','AstroCourier','NightOwl_X','ChromeSakura']; // 15
+const CHAR_POOL = [ // 与 art_v2/characters/*_avatar.webp 对应
+  { id:'naomi', name:'ナオミ' }, { id:'rin', name:'リン' }, { id:'sora', name:'ソラ' },
+  { id:'akira', name:'アキラ' }, { id:'yuki', name:'ユキ' }, { id:'hikari', name:'ヒカリ' },
+  { id:'ren', name:'レン' }, { id:'kaede', name:'カエデ' }, { id:'mei', name:'メイ' },
+  { id:'echo', name:'エコー' }, { id:'annie', name:'アニー' }, { id:'gaia', name:'ガイア' },
+  { id:'jin', name:'ジン' }, { id:'jie', name:'ジェイ' }, { id:'kuro', name:'クロ' },
+  { id:'tsuki', name:'ツキ' }, { id:'jony', name:'ジョニー' }, { id:'raiden', name:'ライデン' },
+  { id:'shaan', name:'シャン' }, { id:'jeff', name:'ジェフ' },
+];
+
+/** 当日 mock：种子=日期 → 全天任何设备刷新都是同一批；名字 中20/日15/英15 种子洗牌混排 */
+function genMockPlayers(dateStr) {
+  const rng = mulberry32(hashStr('nqc_rank_mock_' + dateStr));
+  // 语言标签池 4:3:3 → 洗牌，再按标签顺序从各池取名
+  const tags = [...Array(20).fill('zh'), ...Array(15).fill('ja'), ...Array(15).fill('en')];
+  for (let i = tags.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [tags[i], tags[j]] = [tags[j], tags[i]]; }
+  const pools = { zh: NAMES_ZH.slice(), ja: NAMES_JA.slice(), en: NAMES_EN.slice() };
+  const list = [];
+  for (let i = 0; i < 50; i++) {
+    const tt = i / 49; // 0=榜首 … 1=榜尾
+    const base = 268000 * Math.pow(600 / 268000, tt);
+    const power = Math.max(100, Math.round(base * (0.88 + rng() * 0.24)));
+    const name = pools[tags[i]].splice(Math.floor(rng() * pools[tags[i]].length), 1)[0];
+    const pool = CHAR_POOL.slice();
+    const party = [];
+    for (let c = 0; c < 3; c++) {
+      const ch = pool.splice(Math.floor(rng() * pool.length), 1)[0];
+      party.push({ charId: ch.id, name: ch.name, level: ri(rng, 10, 80), stars: ri(rng, 2, 6),
+        power: Math.max(120, Math.round(power * (0.15 + rng() * 0.25))) });
+    }
+    list.push({
+      slotId: 'MOCK-' + dateStr + '-' + i, mock: true, name, power,
+      party,
+      megaCount: Math.round(Math.min(12, power / 22000) * (0.5 + rng())),
+      maxEnhance: Math.min(15, Math.round(power / 18000) + ri(rng, 0, 2)),
+      credits: ri(rng, 20000, 9000000), gems: ri(rng, 100, 30000),
+      rank: 0, portraitCount: Math.round(Math.min(60, power / 4500) * (0.5 + rng())),
+      abyssFloor: Math.max(1, Math.round(140 * Math.pow(power / 268000, 0.7) * (0.8 + rng() * 0.4))),
+      caixiaoniao: power > 40000 ? (rng() < 0.7 ? 1 : 0) : (rng() < 0.2 ? 1 : 0),
+      worldWarWins: ri(rng, 0, 2) + (i < 10 ? ri(rng, 1, 9) : 0),
+      ts: 0,
+    });
+  }
+  return list;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 5 · 存储（localStorage）
+   ═══════════════════════════════════════════════════════════════ */
+const LS_ENTRIES = 'nqrank_entries_v2'; // { slotId: entry }
+const LS_CLAIMED = 'nqrank_claimed_v2'; // { slotId: [{ts, code}] } — 领奖新鲜度登记
+const LS_WWCODE  = 'nqrank_ww_code_v2'; // { date: code }
+
+function loadEntries() {
+  try { const o = JSON.parse(localStorage.getItem(LS_ENTRIES) || '{}'); return (o && typeof o === 'object') ? o : {}; }
+  catch { return {}; }
+}
+function saveEntries(o) { try { localStorage.setItem(LS_ENTRIES, JSON.stringify(o)); } catch {} }
+function loadClaimed() {
+  try { const o = JSON.parse(localStorage.getItem(LS_CLAIMED) || '{}'); return (o && typeof o === 'object') ? o : {}; }
+  catch { return {}; }
+}
+function saveClaimed(o) { try { localStorage.setItem(LS_CLAIMED, JSON.stringify(o)); } catch {} }
+function todayStr(d = new Date()) {
+  return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+}
+function yesterdayStr() { const d = new Date(); d.setDate(d.getDate() - 1); return todayStr(d); }
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 5.5 · 线上模式 API（API_BASE 非空时启用；失败静默回退本地）
+   ═══════════════════════════════════════════════════════════════ */
+let REAL = [];          // 全服真实榜单（GET /rank）
+let REAL_OK = false;    // 后端是否连通
+let WAR = null;         // 世界大战服务器战报（GET /war）
+
+async function apiGet(path) {
+  const r = await fetch(API_BASE + path, { cache: 'no-store' });
+  if (!r.ok) throw new Error('http_' + r.status);
+  return r.json();
+}
+async function apiPost(path, body) {
+  const r = await fetch(API_BASE + path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(j.error || 'http_' + r.status); e.data = j; throw e; }
+  return j;
+}
+async function refreshReal() {
+  if (!ONLINE) return;
+  try {
+    const j = await apiGet('/rank');
+    REAL = Array.isArray(j.entries) ? j.entries : [];
+    REAL_OK = true;
+  } catch { REAL_OK = false; toast(t('netErr')); }
+}
+async function refreshWar() {
+  if (!ONLINE) return;
+  try { WAR = await apiGet('/war'); } catch { WAR = null; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 6 · 上榜码 解析 + 验签（与 rankData.js verifyRankCode 同口径）
+   NQCRANK-{base64url(JSON)}-{sig16}，sig16 = HMAC(secret,'NQCRANK'+payload)
+   ═══════════════════════════════════════════════════════════════ */
+function b64urlDecode(s) {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = b64.length % 4 ? '='.repeat(4 - (b64.length % 4)) : '';
+  const bin = atob(b64 + pad);
+  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  return new TextDecoder('utf-8').decode(bytes);
+}
+function b64urlEncode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = ''; bytes.forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function verifyRankCode(raw) {
+  const code = String(raw || '').trim().replace(/\s+/g, '');
+  const m = code.match(/^NQCRANK-([A-Za-z0-9\-_]+)-([0-9A-Fa-f]{16})$/);
+  if (!m) return { ok: false, error: 'format' };
+  const payload = m[1], sig = m[2].toUpperCase();
+  if (sign16('NQCRANK' + payload) !== sig) return { ok: false, error: 'signature' };
+  let data;
+  try { data = JSON.parse(b64urlDecode(payload)); } catch { return { ok: false, error: 'payload' }; }
+  if (!data || data.v !== 1 || typeof data.name !== 'string' || !data.name
+      || !Number.isFinite(data.power)) return { ok: false, error: 'payload' };
+  const sid = data.slotId;
+  data.slotId = (typeof sid === 'string' && sid) ? sid : 'SLOT-' + String(sid ?? '0');
+  data.power = Math.max(0, Math.round(data.power));
+  data.ts = Number.isFinite(data.ts) ? data.ts : 0; // 领奖新鲜度锚点
+  data.party = Array.isArray(data.party) ? data.party.slice(0, 3).map(c => ({
+    charId: String(c.charId || c.id || 'unknown'), name: String(c.name || '?'),
+    level: +c.level || 1, stars: +c.stars || 1, power: +c.power || 0,
+  })) : [];
+  data.megaCount = +data.megaCount || 0; data.maxEnhance = +data.maxEnhance || 0;
+  data.credits = +data.credits || 0; data.gems = +data.gems || 0;
+  data.rank = +data.rank || 0; data.portraitCount = +data.portraitCount || 0;
+  data.abyssFloor = +data.abyssFloor || 0;
+  data.caixiaoniao = data.caixiaoniao ? 1 : 0;
+  data.worldWarWins = +data.worldWarWins || 0;
+  return { ok: true, data };
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 7 · 渲染
+   ═══════════════════════════════════════════════════════════════ */
+const $ = s => document.querySelector(s);
+let MOCK = [];
+let CUR_TAB = 'power';
+let OPEN_KEY = null;
+
+function toast(msg) {
+  const el = $('#toast'); el.textContent = msg; el.classList.add('show');
+  clearTimeout(el._tm); el._tm = setTimeout(() => el.classList.remove('show'), 2000);
+}
+function fmt(n) { return Number(n || 0).toLocaleString('en-US'); }
+function sortKey(p) { return CUR_TAB === 'boss' ? p.abyssFloor : CUR_TAB === 'ww' ? p.worldWarWins : p.power; }
+function sortName() { return CUR_TAB === 'boss' ? t('sortBoss') : CUR_TAB === 'ww' ? t('sortWw') : t('sortPower'); }
+
+function mergedList() {
+  let all;
+  if (ONLINE && REAL_OK) { // 线上模式：全服真实数据（不含 mock）
+    const mySlots = new Set(Object.keys(loadEntries()));
+    all = REAL.map(e => ({ ...e, me: mySlots.has(e.slotId) }));
+  } else { // 本地模式：mock 50 人 + 本机上传
+    const mine = Object.values(loadEntries()).map(e => ({ ...e, me: true }));
+    all = MOCK.concat(mine);
+  }
+  const cnt = {};
+  all.forEach(p => { cnt[p.name] = (cnt[p.name] || 0) + 1; });
+  all.forEach(p => { p.dup = cnt[p.name] > 1; });
+  all.sort((a, b) => sortKey(b) - sortKey(a) || b.power - a.power);
+  all.forEach((p, i) => { p._rank = i + 1; });
+  return all;
+}
+function shortId(p) { return String(p.slotId).replace(/[^A-Za-z0-9]/g, '').slice(-4).toUpperCase(); }
+function mainMetric(p) {
+  if (CUR_TAB === 'boss') return { v: fmt(p.abyssFloor), cls: 'pw3', lb: t('lbFloor') };
+  if (CUR_TAB === 'ww')   return { v: fmt(p.worldWarWins), cls: 'pw2', lb: t('lbWins') };
+  return { v: fmt(p.power), cls: 'pw' + powerTier(p.power), lb: t('lbPower') };
+}
+function avatarHtml(ch) {
+  const hue = [...String(ch.charId)].reduce((s, c) => s + c.charCodeAt(0), 0) % 360;
+  const url = AVATAR_BASE + encodeURIComponent(ch.charId) + AVATAR_SUFFIX;
+  return `<div class="av" style="background:hsl(${hue} 80% 55%)">
+    <span>${(ch.name || '?').charAt(0)}</span>
+    <img src="${url}" alt="" style="display:none"
+      onload="this.style.display='block';this.previousElementSibling.style.display='none'"
+      onerror="this.remove()">
+  </div>`;
+}
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function detailHtml(p) {
+  const chars = (p.party || []).map(ch => `
+    <div class="char">
+      ${avatarHtml(ch)}
+      <div class="cn">${esc(ch.name)}</div>
+      <div class="cs">${'★'.repeat(Math.max(1, Math.min(6, ch.stars)))} Lv.${ch.level}</div>
+      <div class="cp">PWR ${fmt(ch.power)}</div>
+    </div>`).join('') || `<div style="font-size:10px;color:var(--dim)">${t('noParty')}</div>`;
+  const cell = (k, v, hl) => `<div class="cell"><div class="k">${k}</div><div class="v${hl ? ' hl' : ''}">${v}</div></div>`;
+  return `<div class="detail">
+    <div class="chars">${chars}</div>
+    <div class="dgrid">
+      ${cell(t('dMega'), p.megaCount + t('unitJian'), p.megaCount >= 8)}
+      ${cell(t('dEnh'), '+' + p.maxEnhance)}
+      ${cell(t('dCredits'), fmt(p.credits))}
+      ${cell(t('dGems'), fmt(p.gems), true)}
+      ${cell(t('dRank'), p.rank ? '#' + p.rank : '—', true)}
+      ${cell(t('dPort'), p.portraitCount)}
+      ${cell(t('dFloor'), p.abyssFloor + t('unitF'))}
+      ${cell(t('dCxN'), p.caixiaoniao ? t('cxnYes') : t('cxnNo'), !!p.caixiaoniao)}
+    </div>
+  </div>`;
+}
+
+function cardsHtml(list) {
+  return list.map(p => {
+    const m = mainMetric(p);
+    const topCls = p._rank === 1 ? 'top1 top10' : p._rank === 2 ? 'top2 top10' : p._rank === 3 ? 'top3 top10' : p._rank <= 10 ? 'top10' : '';
+    const nm = p.dup ? `${esc(p.name)} <span class="idtag">#${shortId(p)}</span>` : esc(p.name);
+    const meta = CUR_TAB === 'power'
+      ? t('metaPower')(fmt(p.power), p.abyssFloor, p.worldWarWins)
+      : t('metaOther')(fmt(p.power), '#' + p._rank);
+    return `<div class="card ${topCls} ${p.me ? 'me-hl' : ''}" data-key="${esc(p.slotId)}">
+      <div class="rank-badge">${p._rank}</div>
+      <div class="info"><div class="nm">${nm}</div><div class="meta">${meta}</div></div>
+      <div class="pw"><div class="v ${m.cls}">${m.v}</div><div class="lb">${m.lb}</div></div>
+    </div>${OPEN_KEY === p.slotId ? detailHtml(p) : ''}`;
+  }).join('');
+}
+
+/* ─── 世界大战模拟（昨日战报，种子稳定；WW Tab 顶部展示） ─── */
+function simulateWW(dateStr) {
+  const rng = mulberry32(hashStr('nqc_ww_sim_' + dateStr));
+  const roster = genMockPlayers(dateStr).slice(0, 15)
+    .map(p => ({ name: p.name, power: p.party.reduce((s, c) => s + c.power, 0), me: false }));
+  const mine = Object.values(loadEntries()).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))[0];
+  if (mine && mine.party && mine.party.length) {
+    roster.push({ name: mine.name, power: mine.party.reduce((s, c) => s + (c.power || 0), 0) || mine.power, me: true, wwWins: mine.worldWarWins });
+  }
+  let alive = roster.slice();
+  const total = alive.length;
+  let playerRank = null;
+  while (alive.length > 1) {
+    const rolled = alive.map(u => ({ u, eff: u.power * (0.8 + rng() * 0.4) }));
+    rolled.sort((a, b) => a.eff - b.eff);
+    const dead = rolled[0].u;
+    alive = alive.filter(u => u !== dead);
+    if (dead.me) playerRank = alive.length + 1;
+  }
+  const champion = alive[0];
+  if (champion.me) playerRank = 1;
+  return { champion, playerRank, total, entered: !!mine };
+}
+
+function wwReportHtml() {
+  if (ONLINE) { // 线上模式：服务器每日种子模拟战报
+    if (!WAR || !WAR.champion) return `<div class="ww-report"><div class="wt">${t('wwTitle')}</div><div class="ww-hint" style="color:var(--dim)">⏳ ${t('wwBefore')}</div></div>`;
+    const mySlots = new Set(Object.keys(loadEntries()));
+    const mineRow = (WAR.results || []).find(r => r.slotId && mySlots.has(r.slotId));
+    const champIsMe = !!(WAR.champion.slotId && mySlots.has(WAR.champion.slotId));
+    let codeHtml = '';
+    if (champIsMe) {
+      let codes = {};
+      try { codes = JSON.parse(localStorage.getItem(LS_WWCODE) || '{}'); } catch {}
+      if (!codes[WAR.date]) {
+        const mine = Object.values(loadEntries()).find(e => e.slotId === WAR.champion.slotId) || {};
+        const w = Math.max(0, Math.min(255, Math.floor(mine.worldWarWins ?? 1)));
+        const rand = Array.from({ length: 6 }, () => '0123456789ABCDEF'[(Math.random() * 16) | 0]).join('');
+        const payload = w.toString(16).toUpperCase().padStart(2, '0') + rand;
+        codes[WAR.date] = `NQC-RANK_WW-${payload}-${sign16('RANK_WW-' + payload)}`;
+        try { localStorage.setItem(LS_WWCODE, JSON.stringify(codes)); } catch {}
+      }
+      codeHtml = `<div class="ww-code" data-copy="${codes[WAR.date]}">${codes[WAR.date]}</div><div class="ww-hint">🏅 ${t('wwReward')}</div>`;
+    } else {
+      codeHtml = `<div class="ww-hint" style="color:var(--dim)">${t('wwNeed')}</div>`;
+    }
+    return `<div class="ww-report">
+      <div class="wt">${t('wwTitle')}</div>
+      <div class="ww-champ">
+        <div class="crown">👑</div>
+        <div>
+          <div class="who">${t('wwChamp')(esc(WAR.champion.name))}${champIsMe ? ' · YOU!' : ''}</div>
+          <div class="sub2">${mineRow ? t('wwYou')(mineRow.rank, WAR.total) : t('wwYouOut')} · ${WAR.date}</div>
+        </div>
+      </div>${codeHtml}</div>`;
+  }
+  const now = new Date();
+  if (now.getHours() < 12) return `<div class="ww-report"><div class="wt">${t('wwTitle')}</div><div class="ww-hint" style="color:var(--dim)">⏳ ${t('wwBefore')}</div></div>`;
+  const yDate = yesterdayStr();
+  const res = simulateWW(yDate);
+  let codeHtml = '';
+  if (res.champion.me) {
+    // 世界大战奖励码: NQC-RANK_WW-{ww2hex+6rand}-{sig16}（与 cdkData.generateRankWwCdk 同口径）
+    let codes = {};
+    try { codes = JSON.parse(localStorage.getItem(LS_WWCODE) || '{}'); } catch {}
+    if (!codes[yDate]) {
+      const w = Math.max(0, Math.min(255, Math.floor(res.champion.wwWins ?? 1)));
+      const rand = Array.from({ length: 6 }, () => '0123456789ABCDEF'[(Math.random() * 16) | 0]).join('');
+      const payload = w.toString(16).toUpperCase().padStart(2, '0') + rand;
+      codes[yDate] = `NQC-RANK_WW-${payload}-${sign16('RANK_WW-' + payload)}`;
+      try { localStorage.setItem(LS_WWCODE, JSON.stringify(codes)); } catch {}
+    }
+    codeHtml = `<div class="ww-code" data-copy="${codes[yDate]}">${codes[yDate]}</div><div class="ww-hint">🏅 ${t('wwReward')}</div>`;
+  } else {
+    codeHtml = `<div class="ww-hint" style="color:var(--dim)">${t('wwNeed')}</div>`;
+  }
+  return `<div class="ww-report">
+    <div class="wt">${t('wwTitle')}</div>
+    <div class="ww-champ">
+      <div class="crown">👑</div>
+      <div>
+        <div class="who">${t('wwChamp')(esc(res.champion.name))}${res.champion.me ? ' · YOU!' : ''}</div>
+        <div class="sub2">${res.entered ? t('wwYou')(res.playerRank, res.total) : t('wwYouOut')} · ${yDate}</div>
+      </div>
+    </div>${codeHtml}</div>`;
+}
+
+/* ─── 主榜渲染 ─── */
+function renderBoard() {
+  const board = $('#board');
+  board.innerHTML = Array.from({ length: 8 }, () =>
+    `<div class="skel"><i style="width:36px;height:36px"></i>
+     <div style="flex:1"><i style="width:55%;height:12px"></i><i style="width:35%;height:9px;margin-top:6px"></i></div>
+     <i style="width:60px;height:18px"></i></div>`).join('');
+  setTimeout(() => {
+    const list = mergedList();
+    let html = '';
+    if (CUR_TAB === 'ww') html += wwReportHtml();
+    if (ONLINE && REAL_OK && !list.length) { // 线上全服榜为空 → 虚位以待引导
+      html += `<div class="empty"><div class="ico">🌐</div>
+        <div class="p1">${t('emptyTitleOnline')}</div><div class="p2">${t('emptySubOnline')}</div></div>`;
+    } else if (!(ONLINE && REAL_OK) && !Object.keys(loadEntries()).length) {
+      html += `<div class="empty"><div class="ico">📡</div>
+        <div class="p1">${t('emptyTitle')}</div><div class="p2">${t('emptySub')}</div></div>`;
+    }
+    html += cardsHtml(list);
+    html += `<div class="board-foot">${t('boardFoot')(list.length, sortName())}</div>`;
+    board.innerHTML = html;
+  }, 260);
+}
+
+/* ─── 英雄区：我的卡片 ─── */
+function myBestEntry() { // 最新上传的存档作为"我"
+  const all = Object.values(loadEntries());
+  if (!all.length) return null;
+  return all.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))[0];
+}
+function myOverallRank(slotId) { // 总榜名次（礼包档位锚定总榜）
+  const saved = CUR_TAB; CUR_TAB = 'power';
+  const list = mergedList(); CUR_TAB = saved;
+  const me = list.find(p => p.me && p.slotId === slotId);
+  return me ? me._rank : null;
+}
+function isTsClaimed(slotId, ts) {
+  const c = loadClaimed()[slotId] || [];
+  return c.some(r => r.ts === ts);
+}
+function renderMe() {
+  const me = myBestEntry();
+  const el = $('#meCard');
+  if (!me) { el.className = 'me empty'; el.innerHTML = `<div>${t('meEmpty')}</div>`; return; }
+  const rank = myOverallRank(me.slotId);
+  const fresh = me.ts > 0 && !isTsClaimed(me.slotId, me.ts);
+  el.className = 'me';
+  el.innerHTML = `
+    <div class="medal"><div class="r">${rank ? '#' + rank : '—'}</div><div class="k">${t('meRank')}</div></div>
+    <div class="meinfo">
+      <div class="menm">${esc(me.name)}</div>
+      <div class="memeta">${t('mePower')} <b>${fmt(me.power)}</b> · ${t('meFloor')} <b>${me.abyssFloor}F</b> · ${t('meWins')} <b>${me.worldWarWins}${t('unitWin')}</b></div>
+    </div>
+    <div class="mestate ${fresh ? 'can' : 'done'}">${fresh ? '● ' + t('canClaim') : t('claimed')}</div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 8 · 每日礼包（领奖新鲜度：每次上传 ts 只能领一次）
+   ═══════════════════════════════════════════════════════════════ */
+function giftTierOf(rank) { return GIFT_TIERS.find(x => rank <= x.maxRank); }
+function genGiftCode(type) {
+  const payload = Array.from({ length: 8 }, () => '0123456789ABCDEF'[(Math.random() * 16) | 0]).join('');
+  return `NQC-${type}-${payload}-${sign16(type + '-' + payload)}`;
+}
+function renderGift() {
+  const body = $('#giftBody');
+  const me = myBestEntry();
+  if (!me) {
+    body.innerHTML = `<div class="gift-none">${t('giftNone')}</div>`;
+    $('#giftDot').style.display = 'none';
+    return;
+  }
+  const rank = myOverallRank(me.slotId) || 9999;
+  const tier = giftTierOf(rank);
+  const claimedList = loadClaimed()[me.slotId] || [];
+  const rec = claimedList.find(r => r.ts === me.ts);
+  $('#giftDot').style.display = (!rec && me.ts > 0) ? '' : 'none';
+  if (rec) { // 本次 ts 已领 → 锁定，提示再次上传
+    body.innerHTML = `
+      <div class="gift-tier"><div>
+        <div class="t">${t('giftTier')(rank)} · ${t('tierName')[tier.type]}</div>
+        <div class="r">${t('giftReward')(tier)}</div>
+      </div></div>
+      <div class="giftcode" style="display:${rec.code ? 'block' : 'none'}">
+        <div class="code">${rec.code}</div>
+        <div class="row">
+          <button class="btn ghost" style="height:32px;padding:0 14px" id="giftCopyBtn">${t('giftCopy')}</button>
+          <span class="hint">${t('giftHint')}</span>
+        </div>
+      </div>
+      <div class="gift-done" style="display:block">${t('giftDone')}<span class="re">🔄 ${t('giftReupload')}</span></div>`;
+    $('#giftCopyBtn').addEventListener('click', () => copyText(rec.code));
+    return;
+  }
+  body.innerHTML = `
+    <div class="gift-tier"><div>
+      <div class="t">${t('giftTier')(rank)} · ${t('tierName')[tier.type]}</div>
+      <div class="r">${t('giftReward')(tier)}</div>
+    </div>
+    <button class="btn pink" id="giftBtn" style="height:38px">${t('giftClaimBtn')}</button></div>
+    <div class="giftcode" id="giftCodeBox">
+      <div class="code" id="giftCodeText"></div>
+      <div class="row">
+        <button class="btn ghost" id="giftCopyBtn" style="height:32px;padding:0 14px">${t('giftCopy')}</button>
+        <span class="hint">${t('giftHint')}</span>
+      </div>
+    </div>`;
+  $('#giftBtn').addEventListener('click', async () => {
+    if (ONLINE) { // 线上模式：服务器按全服名次签发奖励码（同一上传 ts 仅可领一次）
+      $('#giftBtn').disabled = true;
+      try {
+        const j = await apiGet('/reward?slot=' + encodeURIComponent(me.slotId));
+        const all = loadClaimed();
+        (all[me.slotId] = all[me.slotId] || []).push({ ts: me.ts, code: j.code });
+        saveClaimed(all);
+        renderGift(); renderMe();
+        toast(t('giftGenOk'));
+      } catch (e) {
+        if (e.message === 'http_409') { // 服务器判定已领 → 重绘为已领视图
+          const all = loadClaimed();
+          if (!(all[me.slotId] || []).some(r => r.ts === me.ts)) {
+            (all[me.slotId] = all[me.slotId] || []).push({ ts: me.ts, code: '' });
+            saveClaimed(all);
+          }
+          renderGift(); renderMe();
+        } else { toast(t('netErr')); $('#giftBtn').disabled = false; }
+      }
+      return;
+    }
+    const code = genGiftCode(tier.type);
+    const all = loadClaimed();
+    (all[me.slotId] = all[me.slotId] || []).push({ ts: me.ts, code }); // 登记本次 ts
+    saveClaimed(all);
+    renderGift(); renderMe();
+    toast(t('giftGenOk'));
+  });
+  $('#giftCopyBtn').addEventListener('click', () => copyText($('#giftCodeText').textContent));
+  $('#giftCodeBox').style.display = 'none'; // 领取后 renderGift 重绘为已领视图并展示码
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = document.createElement('textarea'); ta.value = text;
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+  }
+  toast(t('giftCopied'));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 9 · i18n 应用 + 语言切换
+   ═══════════════════════════════════════════════════════════════ */
+function applyI18n() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : LANG === 'ja' ? 'ja' : 'en';
+  $('#uiTitle').textContent = t('title');
+  $('#uiSub').textContent = t('sub');
+  $('#uiLive').textContent = ONLINE ? t('liveOnline') : t('live');
+  $('#codeInput').placeholder = t('codePh');
+  $('#codeBtn').textContent = t('codeBtn');
+  $('#demoLink').textContent = t('demo');
+  $('#uiGiftTitle').textContent = t('giftTitle');
+  document.querySelector('[data-tt="tabPower"]').textContent = t('tabPower');
+  document.querySelector('[data-tt="tabBoss"]').textContent = t('tabBoss');
+  document.querySelector('[data-tt="tabWw"]').textContent = t('tabWw');
+  document.title = t('title') + ' · NAOMI WORLD RANKING';
+  document.querySelectorAll('#langBox button').forEach(b => b.classList.toggle('on', b.dataset.lang === LANG));
+}
+$('#langBox').addEventListener('click', e => {
+  const b = e.target.closest('button[data-lang]');
+  if (!b || b.dataset.lang === LANG) return;
+  LANG = b.dataset.lang;
+  try { localStorage.setItem(LS_LANG, LANG); } catch {}
+  applyI18n(); renderMe(); renderGift(); renderBoard();
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 10 · 事件
+   ═══════════════════════════════════════════════════════════════ */
+$('#board').addEventListener('click', e => {
+  const wc = e.target.closest('.ww-code');
+  if (wc) { copyText(wc.dataset.copy); return; }
+  const card = e.target.closest('.card');
+  if (!card) return;
+  const key = card.dataset.key;
+  OPEN_KEY = (OPEN_KEY === key) ? null : key;
+  renderBoard();
+});
+document.querySelectorAll('.tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    CUR_TAB = btn.dataset.tab;
+    OPEN_KEY = null;
+    renderBoard();
+  });
+});
+$('#codeBtn').addEventListener('click', async () => {
+  const msg = $('#codeMsg');
+  const raw = $('#codeInput').value;
+  const v = verifyRankCode(raw);
+  if (!v.ok) {
+    msg.className = 'codemsg err';
+    msg.textContent = v.error === 'signature' ? t('codeErrSig')
+      : v.error === 'payload' ? t('codeErrPayload') : t('codeErrFormat');
+    return;
+  }
+  if (ONLINE) { // 线上模式：先 POST 到 Worker，验签+新鲜度由服务器裁决
+    msg.className = 'codemsg'; msg.textContent = '…';
+    try {
+      const code = String(raw || '').trim().replace(/\s+/g, '');
+      const j = await apiPost('/rank', { code });
+      const entries = loadEntries(); // 本地也存一份：标识"我" + 领奖 ts 锚点
+      entries[v.data.slotId] = { ...v.data, savedAt: Date.now() };
+      saveEntries(entries);
+      await refreshReal(); await refreshWar();
+      msg.className = 'codemsg ok';
+      msg.textContent = `${t('codeOkOnline')(v.data.name)} · #${j.rank}`;
+    } catch (e) {
+      msg.className = 'codemsg err';
+      msg.textContent = (e.message === 'stale' || e.message === 'future') ? t('codeErrStale')
+        : e.message === 'signature' ? t('codeErrSig') : t('netErr');
+      return;
+    }
+  } else { // 本地模式：仅存本机
+    const entries = loadEntries();
+    entries[v.data.slotId] = { ...v.data, savedAt: Date.now() };
+    saveEntries(entries);
+    msg.className = 'codemsg ok';
+    msg.textContent = t('codeOk')(v.data.name);
+  }
+  $('#codeInput').value = '';
+  OPEN_KEY = null;
+  renderMe(); renderGift(); renderBoard();
+});
+$('#demoLink').addEventListener('click', () => {
+  const demo = {
+    v: 1, slotId: 'DEMO01', name: 'ナオミ推し', power: 152300,
+    party: [
+      { charId: 'naomi', name: 'ナオミ', level: 80, stars: 6, power: 61500 },
+      { charId: 'rin',   name: 'リン',   level: 72, stars: 5, power: 50400 },
+      { charId: 'sora',  name: 'ソラ',   level: 68, stars: 5, power: 40400 },
+    ],
+    megaCount: 9, maxEnhance: 14, credits: 3250000, gems: 8800, rank: 1,
+    portraitCount: 41, abyssFloor: 108, caixiaoniao: 1, worldWarWins: 7,
+    ts: Date.now(),
+  };
+  const payload = b64urlEncode(JSON.stringify(demo));
+  $('#codeInput').value = `NQCRANK-${payload}-${sign16('NQCRANK' + payload)}`;
+  toast(t('demoOk'));
+});
+/* 礼包悬浮卡开合 */
+const sheet = $('#giftSheet'), mask = $('#sheetMask');
+function openSheet() { renderGift(); sheet.classList.add('open'); mask.classList.add('open'); }
+function closeSheet() { sheet.classList.remove('open'); mask.classList.remove('open'); }
+$('#giftFab').addEventListener('click', openSheet);
+$('#sheetClose').addEventListener('click', closeSheet);
+mask.addEventListener('click', closeSheet);
+
+/* ═══════════════════════════════════════════════════════════════
+   启动
+   ═══════════════════════════════════════════════════════════════ */
+(function init() {
+  // 英雄区底图：ART_HERO → 回退立绘 → 纯渐变
+  const art = $('#heroArt');
+  const probe = new Image();
+  probe.onload = () => { art.style.backgroundImage = `url("${ART_HERO}")`; };
+  probe.onerror = () => {
+    const p2 = new Image();
+    p2.onload = () => { art.style.backgroundImage = `url("${ART_HERO_FALLBACK}")`; };
+    p2.onerror = () => { art.style.background = 'radial-gradient(80% 100% at 50% 0%,#17204a,#04060e)'; };
+    p2.src = ART_HERO_FALLBACK;
+  };
+  probe.src = ART_HERO;
+  MOCK = genMockPlayers(todayStr());
+  applyI18n(); renderMe(); renderGift(); renderBoard();
+  if (ONLINE) { // 线上模式：拉取全服真实榜 + 服务器战报后重绘
+    refreshReal().then(() => { renderMe(); renderGift(); renderBoard(); });
+    refreshWar().then(() => { if (CUR_TAB === 'ww') renderBoard(); });
+  }
+})();
+</script>
+</body>
+</html>
