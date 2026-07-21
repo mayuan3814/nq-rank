@@ -2081,8 +2081,9 @@ mask.addEventListener('click', closeSheet);
   };
   probe.src = ART_HERO;
   applyI18n(); renderMe(); renderGift(); renderBoard();
-  if (ONLINE) { // 线上模式：拉全服实时榜 + 昨日榜快照 + 昨日大战战报后重绘
-    refreshReal().then(() => { renderMe(); renderGift(); renderBoard(); if (!REAL_OK) showOfflineTip(); });
+  if (ONLINE) { // 线上模式：打开即提示需海外网络环境；数据加载成功自动关闭，加载不出则保持弹窗
+    showOfflineTip();
+    refreshReal().then(() => { renderMe(); renderGift(); renderBoard(); if (REAL_OK) hideOfflineTip(); });
     refreshYday().then(() => { if (CUR_TAB === 'yday' || CUR_TAB === 'ww') renderBoard(); });
     refreshWar().then(() => { renderMe(); if (CUR_TAB === 'ww') renderBoard(); else if (CUR_TAB !== 'yday') renderBoard(); });
   } else {
@@ -2090,7 +2091,7 @@ mask.addEventListener('click', closeSheet);
   }
 })();
 
-/** 离线提示：仅当实时榜接口真正失败时弹出（v7 · 失败才弹，可重试） */
+/** 离线提示（v8）：打开页面即弹出提醒需海外网络环境；榜单数据加载成功则自动关闭，加载不出保持显示可手动重试 */
 function showOfflineTip() {
   if (document.getElementById('offlineTip')) return;
   const d = document.createElement('div');
@@ -2099,6 +2100,7 @@ function showOfflineTip() {
   d.innerHTML = '<div style="max-width:320px;text-align:center;padding:22px;border:1px solid rgba(0,240,255,.35);border-radius:16px;background:#0b1020;box-shadow:0 0 30px rgba(0,240,255,.15)"><div style="font-size:15px;font-weight:800;color:#00f0ff;margin-bottom:10px">' + esc(t('offlineTitle')) + '</div><div style="font-size:12px;color:#9db2d0;line-height:1.8">' + esc(t('offlineBody')) + '</div><button onclick="location.reload()" style="margin-top:14px;padding:8px 22px;border-radius:999px;border:1px solid rgba(0,240,255,.5);background:rgba(0,240,255,.12);color:#00f0ff;font-weight:700;cursor:pointer">' + esc(t('offlineRetry')) + '</button></div>';
   document.body.appendChild(d);
 }
+function hideOfflineTip() { const d = document.getElementById('offlineTip'); if (d) d.remove(); }
 </script>
 
 </body>
