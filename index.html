@@ -883,6 +883,7 @@ const I18N = {
     title: 'Naomi量子战纪星路榜', sub: 'NAOMI QUANTUM CHRONICLE · STAR ROAD RANKING',
     live: 'OFFLINE LEAGUE · 赛季 ∞',
     liveOnline: 'ONLINE LEAGUE · 全球实时榜', netErr: '网络异常 · 稍后自动重试',
+    offlineTitle: '榜单服务连接失败', offlineBody: '榜单服务需连接海外网络环境，请开启网络代理后刷新本页。', offlineRetry: '重新连接',
     uploading: '量子同步中 · 正在上传上榜码…', uploadDone: '同步完成 · 已上榜',
     emptyTitleOnline: '虚位以待', emptySubOnline: '全服榜单暂无人上榜<br>粘贴上榜码，成为全服第一人',
     codeOkOnline: n => `✓ 上榜成功 · ${n} 已杀入全服榜`,
@@ -957,7 +958,8 @@ const I18N = {
   ja: {
     title: 'ナオミ量子戦紀スターロード榜', sub: 'NAOMI QUANTUM CHRONICLE · STAR ROAD RANKING',
     live: 'OFFLINE LEAGUE · シーズン ∞',
-    liveOnline: 'ONLINE LEAGUE · グローバル实时榜', netErr: '通信エラー · 後ほど再試行',
+    liveOnline: 'ONLINE LEAGUE · グローバルライブ', netErr: '通信エラー · 後ほど再試行',
+    offlineTitle: 'ランキングサーバー接続失敗', offlineBody: '海外ネットワーク環境が必要です。VPN接続後にページを更新してください。', offlineRetry: '再接続',
     uploading: '量子同期中 · コード送信中…', uploadDone: '同期完了 · ランクイン済',
     emptyTitleOnline: '虚位以待', emptySubOnline: '全サーバーの榜はまだ空です<br>コードを貼って最初の覇者になろう',
     codeOkOnline: n => `✓ ランクイン · ${n} が全服榜に参戦`,
@@ -1031,6 +1033,7 @@ const I18N = {
     title: 'Naomi Quantum Star Road Ranking', sub: 'NAOMI QUANTUM CHRONICLE · STAR ROAD RANKING',
     live: 'OFFLINE LEAGUE · SEASON ∞',
     liveOnline: 'ONLINE LEAGUE · GLOBAL LIVE', netErr: 'Network error · will retry',
+    offlineTitle: 'Rank Service Unreachable', offlineBody: 'An overseas network connection is required. Please enable a VPN and refresh this page.', offlineRetry: 'Retry',
     uploading: 'Quantum syncing · uploading code…', uploadDone: 'Synced · ranked',
     emptyTitleOnline: 'Awaiting Challengers', emptySubOnline: 'The global board is empty<br>Paste your code and become the first legend',
     codeOkOnline: n => `✓ Ranked! ${n} enters the global board`,
@@ -1496,10 +1499,9 @@ function avatarHtml(ch, cls) {
     return `<div class="${cls}" style="background:hsl(${hue} 80% 55%)"><span>${esc((ch.name || '?').charAt(0))}</span></div>`;
   }
   return `<div class="${cls}" style="background:hsl(${hue} 80% 55%)">
-    <span>${esc((ch.name || '?').charAt(0))}</span>
-    <img src="${url}" alt="" loading="lazy" style="display:none"
-      onload="this.style.display='block';this.previousElementSibling.style.display='none'"
-      onerror="this.remove()">
+    <span style="display:none">${esc((ch.name || '?').charAt(0))}</span>
+    <img src="${url}" alt="" decoding="async"
+      onerror="var p=this.parentElement;this.remove();if(p){var s=p.querySelector('span');if(s)s.style.display=''}">
   </div>`;
 }
 /** 玩家卡头像 = 主队第 1 角色（无角色 → 玩家名首字母色块） */
@@ -2080,31 +2082,24 @@ mask.addEventListener('click', closeSheet);
   probe.src = ART_HERO;
   applyI18n(); renderMe(); renderGift(); renderBoard();
   if (ONLINE) { // 线上模式：拉全服实时榜 + 昨日榜快照 + 昨日大战战报后重绘
-    refreshReal().then(() => { renderMe(); renderGift(); renderBoard(); });
+    refreshReal().then(() => { renderMe(); renderGift(); renderBoard(); if (!REAL_OK) showOfflineTip(); });
     refreshYday().then(() => { if (CUR_TAB === 'yday' || CUR_TAB === 'ww') renderBoard(); });
     refreshWar().then(() => { renderMe(); if (CUR_TAB === 'ww') renderBoard(); else if (CUR_TAB !== 'yday') renderBoard(); });
   } else {
     maybeSnapLocal(Object.values(loadEntries()));
   }
 })();
-</script>
 
-/* 离线检测：接口无返回时弹窗提示（v6） */
-(function(){
-  if (typeof API_BASE === 'undefined' || !API_BASE) return;
-  var shown = false;
-  function showOffline(){
-    if (shown) return; shown = true;
-    var d = document.createElement('div');
-    d.style.cssText = 'position:fixed;inset:0;z-index:999;background:rgba(5,8,20,.82);display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(4px)';
-    d.innerHTML = '<div style="max-width:320px;text-align:center;padding:22px;border:1px solid rgba(0,240,255,.35);border-radius:16px;background:#0b1020;box-shadow:0 0 30px rgba(0,240,255,.15)"><div style="font-size:15px;font-weight:800;color:#00f0ff;margin-bottom:10px">榜单服务连接失败</div><div style="font-size:12px;color:#9db2d0;line-height:1.8">榜单服务需连接海外网络环境。<br/>请开启 VPN 后刷新本页。</div><button onclick="location.reload()" style="margin-top:14px;padding:8px 22px;border-radius:999px;border:1px solid rgba(0,240,255,.5);background:rgba(0,240,255,.12);color:#00f0ff;font-weight:700;cursor:pointer">重新连接</button></div>';
-    document.body.appendChild(d);
-  }
-  var t = setTimeout(showOffline, 6000);
-  fetch(API_BASE.replace(/\/$/, '') + '/rank', { method: 'GET', mode: 'cors' })
-    .then(function(r){ if (!r.ok) showOffline(); clearTimeout(t); })
-    .catch(function(){ clearTimeout(t); showOffline(); });
-})();
+/** 离线提示：仅当实时榜接口真正失败时弹出（v7 · 失败才弹，可重试） */
+function showOfflineTip() {
+  if (document.getElementById('offlineTip')) return;
+  const d = document.createElement('div');
+  d.id = 'offlineTip';
+  d.style.cssText = 'position:fixed;inset:0;z-index:999;background:rgba(5,8,20,.82);display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(4px)';
+  d.innerHTML = '<div style="max-width:320px;text-align:center;padding:22px;border:1px solid rgba(0,240,255,.35);border-radius:16px;background:#0b1020;box-shadow:0 0 30px rgba(0,240,255,.15)"><div style="font-size:15px;font-weight:800;color:#00f0ff;margin-bottom:10px">' + esc(t('offlineTitle')) + '</div><div style="font-size:12px;color:#9db2d0;line-height:1.8">' + esc(t('offlineBody')) + '</div><button onclick="location.reload()" style="margin-top:14px;padding:8px 22px;border-radius:999px;border:1px solid rgba(0,240,255,.5);background:rgba(0,240,255,.12);color:#00f0ff;font-weight:700;cursor:pointer">' + esc(t('offlineRetry')) + '</button></div>';
+  document.body.appendChild(d);
+}
+</script>
 
 </body>
 </html>
