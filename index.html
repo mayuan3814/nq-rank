@@ -422,7 +422,7 @@ function sign16(msg) { return hmacSha256Hex(CDK_SECRET_HEX, msg).slice(0, 16).to
    模块 1 · 配置（★ 部署时改这里 ★）
    ═══════════════════════════════════════════════════════════════ */
 /** ★★ 线上后端：填入你的 Cloudflare Worker 地址（结尾不带 /）即自动切换线上模式；留空 = 本地模式 ★★ */
-const API_BASE = 'https://dry-glade-70a6.348438906.workers.dev/rank'; // 例: 'https://nq-rank-worker.你的账号.workers.dev'
+const API_BASE = 'https://dry-glade-70a6.348438906.workers.dev'; // 例: 'https://nq-rank-worker.你的账号.workers.dev'
 const ONLINE = !!API_BASE;
 
 /** 美术资源（已替换为公网图床 URL，无需自建 OSS；本地开发可改回相对路径） */
