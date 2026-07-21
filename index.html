@@ -678,37 +678,37 @@ const ART_HERO = 'avatars/hero_splash.webp';
 const ART_HERO_FALLBACK = 'avatars/naomi_full.webp';
 /** 角色头像映射（31 角色全量，avatars/{charId}_avatar.webp 同仓库托管；onError 回退首字色块） */
 const AVATAR_MAP = {
-  naomi: 'avatars/naomi_avatar.webp',
-  rin: 'avatars/rin_avatar.webp',
-  sora: 'avatars/sora_avatar.webp',
-  akira: 'avatars/akira_avatar.webp',
-  yuki: 'avatars/yuki_avatar.webp',
-  hikari: 'avatars/hikari_avatar.webp',
-  ren: 'avatars/ren_avatar.webp',
-  kaede: 'avatars/kaede_avatar.webp',
-  mei: 'avatars/mei_avatar.webp',
-  echo: 'avatars/echo_avatar.webp',
-  annie: 'avatars/annie_avatar.webp',
-  gaia: 'avatars/gaia_avatar.webp',
-  jin: 'avatars/jin_avatar.webp',
-  jie: 'avatars/jie_avatar.webp',
-  kuro: 'avatars/kuro_avatar.webp',
-  tsuki: 'avatars/tsuki_avatar.webp',
-  jony: 'avatars/jony_avatar.webp',
-  raiden: 'avatars/raiden_avatar.webp',
-  shaan: 'avatars/shaan_avatar.webp',
-  jeff: 'avatars/jeff_avatar.webp',
-  mega_arthur: 'avatars/mega_arthur_avatar.webp',
-  rom1_battle: 'avatars/rom1_battle_avatar.webp',
-  rom2_battle: 'avatars/rom2_battle_avatar.webp',
-  rom3_battle: 'avatars/rom3_battle_avatar.webp',
-  rom4_battle: 'avatars/rom4_battle_avatar.webp',
-  rom5_battle: 'avatars/rom5_battle_avatar.webp',
-  rom6_battle: 'avatars/rom6_battle_avatar.webp',
-  liuyan_battle: 'avatars/liuyan_battle_avatar.webp',
-  liubeiqiao_battle: 'avatars/liubeiqiao_battle_avatar.webp',
-  mega_jun: 'avatars/mega_jun_avatar.webp',
-  mega_william: 'avatars/mega_william_avatar.webp',
+  naomi: 'avatars/naomi_avatar.webp?v=2',
+  rin: 'avatars/rin_avatar.webp?v=2',
+  sora: 'avatars/sora_avatar.webp?v=2',
+  akira: 'avatars/akira_avatar.webp?v=2',
+  yuki: 'avatars/yuki_avatar.webp?v=2',
+  hikari: 'avatars/hikari_avatar.webp?v=2',
+  ren: 'avatars/ren_avatar.webp?v=2',
+  kaede: 'avatars/kaede_avatar.webp?v=2',
+  mei: 'avatars/mei_avatar.webp?v=2',
+  echo: 'avatars/echo_avatar.webp?v=2',
+  annie: 'avatars/annie_avatar.webp?v=2',
+  gaia: 'avatars/gaia_avatar.webp?v=2',
+  jin: 'avatars/jin_avatar.webp?v=2',
+  jie: 'avatars/jie_avatar.webp?v=2',
+  kuro: 'avatars/kuro_avatar.webp?v=2',
+  tsuki: 'avatars/tsuki_avatar.webp?v=2',
+  jony: 'avatars/jony_avatar.webp?v=2',
+  raiden: 'avatars/raiden_avatar.webp?v=2',
+  shaan: 'avatars/shaan_avatar.webp?v=2',
+  jeff: 'avatars/jeff_avatar.webp?v=2',
+  mega_arthur: 'avatars/mega_arthur_avatar.webp?v=2',
+  rom1_battle: 'avatars/rom1_battle_avatar.webp?v=2',
+  rom2_battle: 'avatars/rom2_battle_avatar.webp?v=2',
+  rom3_battle: 'avatars/rom3_battle_avatar.webp?v=2',
+  rom4_battle: 'avatars/rom4_battle_avatar.webp?v=2',
+  rom5_battle: 'avatars/rom5_battle_avatar.webp?v=2',
+  rom6_battle: 'avatars/rom6_battle_avatar.webp?v=2',
+  liuyan_battle: 'avatars/liuyan_battle_avatar.webp?v=2',
+  liubeiqiao_battle: 'avatars/liubeiqiao_battle_avatar.webp?v=2',
+  mega_jun: 'avatars/mega_jun_avatar.webp?v=2',
+  mega_william: 'avatars/mega_william_avatar.webp?v=2',
 };
 /** 前三奖牌（avatars/rank_*.webp 同仓库托管） */
 const RANK_MEDAL = {
@@ -2088,5 +2088,23 @@ mask.addEventListener('click', closeSheet);
   }
 })();
 </script>
+
+/* 离线检测：接口无返回时弹窗提示（v6） */
+(function(){
+  if (typeof API_BASE === 'undefined' || !API_BASE) return;
+  var shown = false;
+  function showOffline(){
+    if (shown) return; shown = true;
+    var d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;z-index:999;background:rgba(5,8,20,.82);display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(4px)';
+    d.innerHTML = '<div style="max-width:320px;text-align:center;padding:22px;border:1px solid rgba(0,240,255,.35);border-radius:16px;background:#0b1020;box-shadow:0 0 30px rgba(0,240,255,.15)"><div style="font-size:15px;font-weight:800;color:#00f0ff;margin-bottom:10px">榜单服务连接失败</div><div style="font-size:12px;color:#9db2d0;line-height:1.8">榜单服务需连接海外网络环境。<br/>请开启 VPN 后刷新本页。</div><button onclick="location.reload()" style="margin-top:14px;padding:8px 22px;border-radius:999px;border:1px solid rgba(0,240,255,.5);background:rgba(0,240,255,.12);color:#00f0ff;font-weight:700;cursor:pointer">重新连接</button></div>';
+    document.body.appendChild(d);
+  }
+  var t = setTimeout(showOffline, 6000);
+  fetch(API_BASE.replace(/\/$/, '') + '/rank', { method: 'GET', mode: 'cors' })
+    .then(function(r){ if (!r.ok) showOffline(); clearTimeout(t); })
+    .catch(function(){ clearTimeout(t); showOffline(); });
+})();
+
 </body>
 </html>
