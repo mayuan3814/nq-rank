@@ -7,10 +7,20 @@
 <title>Naomi量子战纪星路榜 · NAOMI QUANTUM STAR ROAD RANKING</title>
 <!--
 ═══════════════════════════════════════════════════════════════════
-  Naomi量子战纪星路榜 rank_board.html v5 — 单文件 H5 榜单页（线上模式对接 Cloudflare Worker）
+  Naomi量子战纪星路榜 rank_board.html v6 — 单文件 H5 榜单页（线上模式对接 Cloudflare Worker）
   设计: 赛博霓虹 · 量子青 #00f0ff × 霓虹粉 #ff2a8d · 游戏美术资源底图
 
-  【v5 重做要点】
+  【v6 重做要点】
+  ① 美术资源全本地化：头像/前三奖牌/英雄区底图全部改用同仓库相对路径
+     avatars/*.webp（GitHub Pages 同目录托管，永不过期；img onError 回退首字色块保留）
+  ② RANK 段位徽章：玩家卡片 meta 行 + 详情格显示游戏内 Rank 段位
+     （payload.playerLevel/playerRank → getRankForLevel 映射表，格式「LV.85 全次元之王」；
+     旧数据无此字段优雅降级不显示）——替代旧「榜内名次」格
+  ③ 称号显示沿用 v5（payload.title 字符串 id 或对象均可；旧数据无 title 不占位）
+  ④ mock 彻底清零：页面无任何 mock 生成入口；Worker 新增 /admin/clear 管理端点
+     清 KV 早期测试残留（见 worker.js 头注与 DEPLOY.md）
+
+  【v5 要点（沿用）】
   ① 纯真实数据：mock 生成器/演示码入口全删；无数据显示「虚位以待」引导
   ② 世界大战 v3：昨日快照全员参赛（≥5 人开启，不足显示「满5人明日开战」），
      每轮随机两两配对单败淘汰（奇数轮空）；每场 = 3v3 逐角色对位对拼
@@ -24,7 +34,6 @@
      统一「复制奖励码回游戏」一键复制，回游戏自动识别领奖
   ⑤ 称号显示：payload.title（字符串 id 或对象均可），移植游戏称号特效 CSS
      （glow/shimmer/neon/flame/void/rainbow/divine/chaos/glitch/starlight + 高级称号流光贯穿）
-  ⑥ AVATAR_MAP 31 角色全量公网头像
 
   【部署配置】只需改下方「模块1 · 配置」API_BASE：
     已预填 https://nq-rank-worker.348438906.workers.dev（线上模式）；
@@ -35,7 +44,7 @@
      sig16 = HMAC-SHA256(CDK_SECRET, 'NQCRANK' + payload) 前16位hex大写
      payload(v=1): { v, slotId, name, power, party:[{charId,name,level,stars,power}×3],
        megaCount, maxEnhance, credits, gems, rank, portraitCount,
-       abyssFloor, caixiaoniao, worldWarWins, ts, title? }
+       abyssFloor, caixiaoniao, worldWarWins, ts, title?, playerLevel?, playerRank? }
   ② 每日礼包码: NQC-RANK_D1 / RANK_D3 / RANK_D10 / RANK_N-{8hex}-{sig16}
      负载 = '00' + ts6hex（encodeRankUploadTs 分钟精度，锚 2026-01-01 UTC）
   ③ 昨日榜奖励码: 同②（昨日第1→RANK_D1，昨日前3→RANK_D3；ts 锚结算时刻）
@@ -185,16 +194,16 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
 .card .rank-badge{flex:none;width:34px;height:38px;border-radius:11px;display:flex;
   align-items:center;justify-content:center;font-weight:900;font-size:14px;
   background:rgba(255,255,255,.05);color:var(--dim);border:1px solid rgba(255,255,255,.08)}
-/* 前三 金/银/铜 奖牌图（公网 rank_1/2/3.webp；加载失败自动回退渐变底） */
+/* 前三 金/银/铜 奖牌图（同仓库 avatars/rank_1/2/3.webp；加载失败自动回退渐变底） */
 .card.top1 .rank-badge,.card.top2 .rank-badge,.card.top3 .rank-badge{
   color:transparent;border:none;background-color:transparent;
   background-position:center;background-repeat:no-repeat;background-size:135%;
   filter:drop-shadow(0 0 10px rgba(255,215,0,.45));transform:scale(1.18)}
-.card.top1 .rank-badge{background-image:url('https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Ff3f906c2cbf06e539cc2849c86d396738484b073b4e87f481369fdb2d7c6ffa2?filename=rank_1.webp&sig=k48OlhJTFlDZm3Dgv_cEXEzhAbvP10zpJ09UVMbPwpM=&t=o'),
+.card.top1 .rank-badge{background-image:url('avatars/rank_1.webp'),
   radial-gradient(circle at 35% 30%,#fff3b0,var(--gold) 55%,#b8860b)}
-.card.top2 .rank-badge{background-image:url('https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F4b6e69869fe21599a476171c864f4243cc683e28cd90c7d5976dbc7747ea950d?filename=rank_2.webp&sig=hHaBIrfXSkG2vw6uUR5_kWcKr2tPlGcNH_Khxtg6isU=&t=o'),
+.card.top2 .rank-badge{background-image:url('avatars/rank_2.webp'),
   radial-gradient(circle at 35% 30%,#fff,var(--silver) 55%,#7c8aa0);filter:drop-shadow(0 0 8px rgba(201,214,232,.5));transform:scale(1.14)}
-.card.top3 .rank-badge{background-image:url('https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F4713796b8eaa37acfb1f3665f175a90575b26b442f8aa23f6081fb45169aab87?filename=rank_3.webp&sig=n0rcdtTBx5TfAojqRw2-OYuI2RATH9X0uBeAlkPRHHM=&t=o'),
+.card.top3 .rank-badge{background-image:url('avatars/rank_3.webp'),
   radial-gradient(circle at 35% 30%,#ffd7b0,var(--bronze) 55%,#8a4a1f);filter:drop-shadow(0 0 8px rgba(224,138,78,.5));transform:scale(1.14)}
 .card.top10{border-color:rgba(0,240,255,.45);box-shadow:0 0 12px rgba(0,240,255,.18),inset 0 0 18px rgba(0,240,255,.05)}
 .card.top1{border-color:rgba(255,215,0,.55);box-shadow:0 0 16px rgba(255,215,0,.25)}
@@ -217,6 +226,16 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
   color:#ffb3d1;background:rgba(255,42,141,.12);border:1px solid rgba(255,42,141,.4);
   border-radius:99px;padding:2px 7px;font-family:ui-monospace,Menlo,monospace}
 .kchip svg{flex:none}
+/* RANK 段位徽章（游戏 getRankForLevel 同口径：LV.{playerLevel} {段位名}，颜色随段位） */
+.rbadge{display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:800;letter-spacing:.5px;
+  color:var(--rc,#9ca3af);border:1px solid var(--rc,#9ca3af);border-radius:6px;padding:1px 6px;
+  background:rgba(0,0,0,.32);text-shadow:0 0 8px var(--rc,#9ca3af);white-space:nowrap;vertical-align:1px}
+.rbadge::before{content:"";flex:none;width:5px;height:5px;background:var(--rc,#9ca3af);
+  transform:rotate(45deg);box-shadow:0 0 6px var(--rc,#9ca3af)}
+.rbadge .rlv{font-family:ui-monospace,Menlo,monospace;opacity:.85}
+.rbadge.top{animation:rglow 2s ease-in-out infinite}
+@keyframes rglow{50%{box-shadow:0 0 12px var(--rc,#ffd700)}}
+.me .rbadge{margin-left:6px}
 /* 战力 9 档配色（powerData.js QUANTUM_TIERS 移植） */
 .pw0{color:#67e8f9}.pw1{color:#22d3ee}.pw2{color:#60a5fa}.pw3{color:#818cf8}
 .pw4{color:#a78bfa;text-shadow:0 0 10px rgba(167,139,250,.5)}
@@ -654,48 +673,48 @@ function sign16(msg) { return hmacSha256Hex(CDK_SECRET_HEX, msg).slice(0, 16).to
 const API_BASE = 'https://nq-rank-worker.348438906.workers.dev';
 const ONLINE = !!API_BASE;
 
-/** 美术资源（公网图床 URL，无需自建 OSS） */
-const ART_HERO = 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Ff9f2267b3d527b46ddd8a95d912beda116a9a1b7065f6b08636dfae6a699e049?filename=splash_jeff_farewell.webp&sig=vo27FBcs3ekAzJV4ZQjXjawKoE0HSasAeyNL1drlIy0=&t=o';
-const ART_HERO_FALLBACK = 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F42b1d1b9a58f6d5da16afec74ffe7ac70324252417547f21278588a4f4aa1a8c?filename=naomi_full.webp&sig=6M_B-FqqN_eKfKbYFom8Cx7WKls-n4VxomwajSPvfLU=&t=o';
-/** 角色头像公网映射（31 角色全量，art_v2/characters/*_avatar.webp 已上传图床） */
+/** 美术资源（同仓库相对路径，GitHub Pages 同目录托管，永不过期；加载失败自动回退） */
+const ART_HERO = 'avatars/hero_splash.webp';
+const ART_HERO_FALLBACK = 'avatars/naomi_full.webp';
+/** 角色头像映射（31 角色全量，avatars/{charId}_avatar.webp 同仓库托管；onError 回退首字色块） */
 const AVATAR_MAP = {
-  naomi: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F5e9deb7e23b35fc6c17915c46f7abd7c8ab639bbd04947a1a67c594fdcc01b7f?filename=naomi_avatar.webp&sig=Dp_ThRnfqnmgLNLQdynz1mcvm6y-Bxu5D5LdOVkmX_s=&t=o',
-  rin: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fd58111d0db7219e6fffa2339b7a1b550c805b90e9ec1ed08bb903bb62955e7a9?filename=rin_avatar.webp&sig=gQxQzoxJhIkDzF1G_9jMfp4Sd8o8TKr45IZdRj2xBsk=&t=o',
-  sora: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F182ce04c486ba383eaa33865fa1ebd4f25ac06115763f37bdb3ba7bf2e861a59?filename=sora_avatar.webp&sig=vv3Xvg6co7u5GRoiDO_ztrNx6-T_Cv_LZYyagURNv9M=&t=o',
-  akira: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F13addd93008ad739d61417115669d91983c237e347f5c809ad82543035e9191d?filename=akira_avatar.webp&sig=75FjOab11lLQA3fJD0ZxZc7Qu-kugCFacaOr-o2PU1s=&t=o',
-  yuki: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fcd31858fcf01a7fc2df6fa56463b3ff6b0773af41a5b8bde0d11836f1668d47c?filename=yuki_avatar.webp&sig=xh1AE5CbMgZlIEC8XQtbKZX-cGpDhFAswb64Eyb-JZQ=&t=o',
-  hikari: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F3f5541ac7ea01fc635eac2a73ae28d650bcc72f70f1f9b9bee73740b93ba2fab?filename=hikari_avatar.webp&sig=DaXnRFGup3w55jLt4EIjphhrzb-Wtu14jLKv5o9VWXs=&t=o',
-  ren: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F122444a8dce16fa6558503961d6b49fc04c6fd7b69aad31da8356abb3c39b609?filename=ren_avatar.webp&sig=gYH927OudkKAFe9F6-0-UqSfWYTsw3FdLaTLCKq4Eys=&t=o',
-  kaede: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F30f3437834f0be584065721cfc43743e6fabf52b030ecde5c83e2d926f9beedb?filename=kaede_avatar.webp&sig=JxxujXNKncqo9ORuNvUpge-5q5fvewriemn0HYzPkPE=&t=o',
-  mei: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fca3216507f8b0db061b26256c605120346d2f34a0e96b5f0f8de9389d70e44b9?filename=mei_avatar.webp&sig=_Z3WSPxgrffRyvMgGqjAC8UIzJh8S-iduN9KXnWUtHo=&t=o',
-  echo: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F8b743294d697af62274f2541d7912da9d6777ebae95bd113b1fd8766ce9dc4b3?filename=echo_avatar.webp&sig=bULNwLKbVeqXLTOPDM0qPghMyIsq6zx35qVd0PFTlzc=&t=o',
-  annie: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fb1fb3548067af9bef16392d03f929c70808d29ac565fb24f721f12dbb9522a5e?filename=annie_avatar.webp&sig=6drIpUZuxB6H4AcTwebd6h0Z907Bd_TjiUWzzSZYA8w=&t=o',
-  gaia: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fa73e88a9f1a6fbbdd3e0aa606f7dade7d044c6a2d7090569c79f9af91b7ee92b?filename=gaia_avatar.webp&sig=in8I9h4WkiPDfPPIsHyKCESyekGRKz1zlGna934mcYM=&t=o',
-  jin: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F9e3d066179bb1dbd512e5ab10b1781f7516f82620e8b93dd67362bd9eef9c84b?filename=jin_avatar.webp&sig=6jIyj9xRuLaf-IkndF2z3Gh3jNYLgrGacyh8utGOELM=&t=o',
-  jie: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fd0f40f0f696ef16b192c29cdf1e29a3d5f5291de65b63e013d6431ba10c73c1c?filename=jie_avatar.webp&sig=bsO0qBMuUe3OdpYFCcC_uhgQ7hW5nTVvGYPwV8DsnTg=&t=o',
-  kuro: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fcf64eb7ae291b45a2c8018604b1aa98d01906ad9bc6e6ae2588bf4a0aba9acc9?filename=kuro_avatar.webp&sig=xOkAiPAmJlSkYBvrlBVyPN6PWLFJrvaiY1TNWksekrY=&t=o',
-  tsuki: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F12e6717ec01060a51a47703e03316238ed86b79502c6bf370ba4452b859c0947?filename=tsuki_avatar.webp&sig=Pn0QiIMF28ZiEO9AAOzsM5KyTRdTpiUguzSD-KWG0PM=&t=o',
-  jony: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Febceb2120cdf395496ec6755b9382aac37b2b4fcc71f356a6f8c797b89b7ee18?filename=jony_avatar.webp&sig=GQ832OGHI9Q5mPTtjVVxfuKURW16GdLZZbp1Pcp9njI=&t=o',
-  raiden: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F6dc54c380b595421e3a0e12bb8c33359cebc665599f1bc61ad0af4a3670b0b71?filename=raiden_avatar.webp&sig=01382_2wtiiTewTGhtdxjF9-evOxgJVRq0cO0qy_RZE=&t=o',
-  shaan: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F88630761792730372b8e5e8f6f7b6b716c5b8dedd3ab0f106ec1a6fb70be5707?filename=shaan_avatar.webp&sig=C7TwPV1DuppUWTjm3u8Uzht8AgKiGMCzmqrB2L0lKcQ=&t=o',
-  jeff: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F04be45e5cbc28007e89f38af3b7e957935c2af46fb805afd19add05265d6d30f?filename=jeff_avatar.webp&sig=3pXHvDFdxeTFWv2kxQoHvu4A7Yy1GoMo4B9UfTzN_uA=&t=o',
-  mega_arthur: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F83749261e7328653b73e6c9a53a04a95066a918b3ea73204a228906d38c930d6?filename=mega_arthur_avatar.webp&sig=XFWkqpeM4Ky7BxwcfLCe0xPa8WaYtDzAUpobGS0JysU=&t=o',
-  rom1_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F782f93ef33bf72e75c35efecdd5341102119cf673416650a0b0eb92cb65387c2?filename=rom1_battle_avatar.webp&sig=lN-aYXBm0rVm_ZeIcuDDZ1B4YOp_H9S3V2LLV0qE3z4=&t=o',
-  rom2_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Ff0bf408764912779ea0bcf3d7e326878663d07a27640c7a1f1d94fe535952911?filename=rom2_battle_avatar.webp&sig=Z-D5TauW5-wFz4AACElG7Y06cxl47if1jcCWEeV866k=&t=o',
-  rom3_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F82ba16df2cfb6531f6f5dec98e66c0473280fc08df365703000370a8d7d1d76d?filename=rom3_battle_avatar.webp&sig=qESTeP77aHoiWTL3Es6b9X26YZZY9apJ4L_RyAHzy8M=&t=o',
-  rom4_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F1b8b93afc692c7b450aa833fe7bb4f5b8bb92a84233418db5c8f9877d3879c96?filename=rom4_battle_avatar.webp&sig=nkgp4Xm7754Bb6n5vRFV77_m4iEB_sJJr2XhO3aVtF4=&t=o',
-  rom5_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F89e3e46a096a9be6621074186bfffb0d3c34e47e76675c38ae8927af2564703b?filename=rom5_battle_avatar.webp&sig=-5H4VqwsbCo0XaBXluOsWnFl15nzdFZh-Z7LPbennWo=&t=o',
-  rom6_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fe2c383c188afbef163f3b03af8337012c4f7f29d1c62fb0150c040ccf287c1b7?filename=rom6_battle_avatar.webp&sig=ILzUTcEFPwe5VYDfSl4MoQTDbc70xXFulKT3VYB5JLU=&t=o',
-  liuyan_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Ff0e4bac94e68c7ffdec2794a5e8e297e72ef013a93bb5f073aa08a8278506fa5?filename=liuyan_battle_avatar.webp&sig=DlY5fSWCkAENnyg_cXHMB84zobetykESW3DB2vdKtdA=&t=o',
-  liubeiqiao_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F4bae3e3f8a0664491fd25741e13d8a824078e25ac1585f2e9a84382c169570d8?filename=liubeiqiao_battle_avatar.webp&sig=D96z3QAsljQRFPHiazQa0gxRQW5ZCoXgQ1kgHZxaKB0=&t=o',
-  mega_jun: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F93e68533bb136ff9976f5955655d70b1773e7ece510530386b7cebd45db370bf?filename=mega_jun_avatar.webp&sig=EzEUPU6kImbqM4Zmmr92-1wkOQwCcb8jIMBMG709r4k=&t=o',
-  mega_william: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F96e9f5a283f4bc7c28b4d9e621f8837ead9dce707d4e20a2bae648886536c4ee?filename=mega_william_avatar.webp&sig=NbLTGEawP-D9pz9Q8QxVe9ffMD_fUaKQ0FzF1s2p3o0=&t=o',
+  naomi: 'avatars/naomi_avatar.webp',
+  rin: 'avatars/rin_avatar.webp',
+  sora: 'avatars/sora_avatar.webp',
+  akira: 'avatars/akira_avatar.webp',
+  yuki: 'avatars/yuki_avatar.webp',
+  hikari: 'avatars/hikari_avatar.webp',
+  ren: 'avatars/ren_avatar.webp',
+  kaede: 'avatars/kaede_avatar.webp',
+  mei: 'avatars/mei_avatar.webp',
+  echo: 'avatars/echo_avatar.webp',
+  annie: 'avatars/annie_avatar.webp',
+  gaia: 'avatars/gaia_avatar.webp',
+  jin: 'avatars/jin_avatar.webp',
+  jie: 'avatars/jie_avatar.webp',
+  kuro: 'avatars/kuro_avatar.webp',
+  tsuki: 'avatars/tsuki_avatar.webp',
+  jony: 'avatars/jony_avatar.webp',
+  raiden: 'avatars/raiden_avatar.webp',
+  shaan: 'avatars/shaan_avatar.webp',
+  jeff: 'avatars/jeff_avatar.webp',
+  mega_arthur: 'avatars/mega_arthur_avatar.webp',
+  rom1_battle: 'avatars/rom1_battle_avatar.webp',
+  rom2_battle: 'avatars/rom2_battle_avatar.webp',
+  rom3_battle: 'avatars/rom3_battle_avatar.webp',
+  rom4_battle: 'avatars/rom4_battle_avatar.webp',
+  rom5_battle: 'avatars/rom5_battle_avatar.webp',
+  rom6_battle: 'avatars/rom6_battle_avatar.webp',
+  liuyan_battle: 'avatars/liuyan_battle_avatar.webp',
+  liubeiqiao_battle: 'avatars/liubeiqiao_battle_avatar.webp',
+  mega_jun: 'avatars/mega_jun_avatar.webp',
+  mega_william: 'avatars/mega_william_avatar.webp',
 };
-/** 前三奖牌公网图（art_v2/icons/rank_*.webp 已上传） */
+/** 前三奖牌（avatars/rank_*.webp 同仓库托管） */
 const RANK_MEDAL = {
-  1: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Ff3f906c2cbf06e539cc2849c86d396738484b073b4e87f481369fdb2d7c6ffa2?filename=rank_1.webp&sig=k48OlhJTFlDZm3Dgv_cEXEzhAbvP10zpJ09UVMbPwpM=&t=o',
-  2: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F4b6e69869fe21599a476171c864f4243cc683e28cd90c7d5976dbc7747ea950d?filename=rank_2.webp&sig=hHaBIrfXSkG2vw6uUR5_kWcKr2tPlGcNH_Khxtg6isU=&t=o',
-  3: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F4713796b8eaa37acfb1f3665f175a90575b26b442f8aa23f6081fb45169aab87?filename=rank_3.webp&sig=n0rcdtTBx5TfAojqRw2-OYuI2RATH9X0uBeAlkPRHHM=&t=o',
+  1: 'avatars/rank_1.webp',
+  2: 'avatars/rank_2.webp',
+  3: 'avatars/rank_3.webp',
 };
 
 /** 战力 9 档（与游戏满配量级一致：满配约 4.5万-5.5万 → CSS 类 pw0..pw8） */
@@ -703,6 +722,44 @@ const POWER_TIER_MINS = [0, 1000, 2500, 5000, 10000, 18000, 28000, 40000, 52000]
 function powerTier(v) {
   for (let i = POWER_TIER_MINS.length - 1; i >= 0; i--) if (v >= POWER_TIER_MINS[i]) return i;
   return 0;
+}
+
+/** RANK 段位表（coreData.js RANKS / getRankForLevel 同口径：[段位序号, 所需等级, 中, 日, 英, 颜色]） */
+const PLAYER_RANK_ROWS = [
+  [1,  1,  '研修生',     '研修生',         'Trainee',              '#9ca3af'],
+  [2,  5,  '配送员',     '配送員',         'Courier',              '#22c55e'],
+  [3,  12, '路线工匠',   'ルート職人',     'Route Artisan',        '#3b82f6'],
+  [4,  20, '量子配送士', '量子配送士',     'Quantum Courier',      '#a855f7'],
+  [5,  28, '星路使者',   '星路使い',       'Star Router',          '#f59e0b'],
+  [6,  38, '次元航行者', '次元航行者',     'Dimension Navigator',  '#06b6d4'],
+  [7,  48, '传说配送员', '伝説の配達人',   'Legendary Courier',    '#ef4444'],
+  [8,  60, '路线大师',   'ルートマスター', 'Route Master',         '#ec4899'],
+  [9,  72, '次元支配者', '次元の支配者',   'Dimension Ruler',      '#fbbf24'],
+  [10, 85, '全次元之王', '全次元の王',     'King of All Dimensions','#ff2a8d'],
+];
+const PLAYER_RANKS = PLAYER_RANK_ROWS.map(r => ({ level: r[0], minLevel: r[1], z: r[2], j: r[3], e: r[4], c: r[5] }));
+/** 与游戏 getRankForLevel 同口径：按玩家等级取已达最高段位 */
+function rankForLevel(lv) {
+  let r = PLAYER_RANKS[0];
+  for (const x of PLAYER_RANKS) if (lv >= x.minLevel) r = x;
+  return r;
+}
+/** 玩家 Rank 段位解析：优先 playerLevel 推导；仅旧码有 playerRank 序号时按序号取；都无 → null（不显示） */
+function playerRankOf(p) {
+  const lv = Math.floor(+p.playerLevel || 0);
+  if (lv > 0) return { ...rankForLevel(lv), lv };
+  const rl = Math.floor(+p.playerRank || 0);
+  const hit = rl > 0 ? PLAYER_RANKS.find(x => x.level === rl) : null;
+  return hit ? { ...hit, lv: 0 } : null;
+}
+function rankNameOf(r) { return LANG === 'zh' ? r.z : LANG === 'ja' ? r.j : r.e; }
+/** 段位徽章文本：「LV.85 全次元之王」（无等级信息时仅段位名） */
+function rankBadgeText(r) { return (r.lv > 0 ? `LV.${r.lv} ` : '') + rankNameOf(r); }
+/** 段位徽章 HTML（段位 ≥9 级加呼吸辉光） */
+function rankBadgeHtml(p) {
+  const r = playerRankOf(p);
+  if (!r) return '';
+  return `<span class="rbadge${r.level >= 9 ? ' top' : ''}" style="--rc:${r.c}">${r.lv > 0 ? `<span class="rlv">LV.${r.lv}</span>` : ''}${esc(rankNameOf(r))}</span>`;
 }
 
 /** 内联 SVG 图标（全页去 emoji：图标一律 SVG/CSS） */
@@ -858,7 +915,7 @@ const I18N = {
     metaPowerNoWar: f => `塔 <b>${f}F</b>`,
     metaOther: (p, r) => `战力 <b>${p}</b> · 名次 <b>${r}</b>`,
     dMega: 'MEGA装备', dEnh: '最高强化', dCredits: '金币', dGems: '钻石',
-    dRank: '榜内名次', dPort: '立绘解锁', dFloor: '塔层数', dCxN: '菜小鸟',
+    dRank: 'Rank段位', dPort: '立绘解锁', dFloor: '塔层数', dCxN: '菜小鸟',
     cxnYes: '已击破', cxnNo: '未击破', unitJian: '件', unitF: 'F',
     noParty: '无角色数据',
     uploadedAt: '上传于',
@@ -933,7 +990,7 @@ const I18N = {
     metaPowerNoWar: f => `塔 <b>${f}F</b>`,
     metaOther: (p, r) => `戦力 <b>${p}</b> · 順位 <b>${r}</b>`,
     dMega: 'MEGA装備', dEnh: '最大強化', dCredits: 'ゴールド', dGems: 'ジェム',
-    dRank: '榜内順位', dPort: '立絵解放', dFloor: '塔の階数', dCxN: '菜小鳥',
+    dRank: 'Rank段位', dPort: '立絵解放', dFloor: '塔の階数', dCxN: '菜小鳥',
     cxnYes: '撃破済', cxnNo: '未撃破', unitJian: '個', unitF: 'F',
     noParty: 'キャラデータなし',
     uploadedAt: 'アップロード',
@@ -1006,7 +1063,7 @@ const I18N = {
     metaPowerNoWar: f => `Tower <b>${f}F</b>`,
     metaOther: (p, r) => `PWR <b>${p}</b> · Rank <b>${r}</b>`,
     dMega: 'MEGA Gear', dEnh: 'Max Enhance', dCredits: 'Credits', dGems: 'Gems',
-    dRank: 'Board Rank', dPort: 'Portraits', dFloor: 'Tower', dCxN: 'CaiXiaoNiao',
+    dRank: 'Rank Tier', dPort: 'Portraits', dFloor: 'Tower', dCxN: 'CaiXiaoNiao',
     cxnYes: 'Defeated', cxnNo: 'Alive', unitJian: '', unitF: 'F',
     noParty: 'No party data',
     uploadedAt: 'Uploaded',
@@ -1181,6 +1238,8 @@ function verifyRankCode(raw) {
   data.megaCount = +data.megaCount || 0; data.maxEnhance = +data.maxEnhance || 0;
   data.credits = +data.credits || 0; data.gems = +data.gems || 0;
   data.rank = +data.rank || 0; data.portraitCount = +data.portraitCount || 0;
+  data.playerLevel = Math.max(0, Math.floor(+data.playerLevel || 0)); // 玩家等级（v6+，旧码无 → 0 = 不显示段位徽章）
+  data.playerRank = Math.max(0, Math.floor(+data.playerRank || 0));   // RANK 段位序号 1-10（v6+，旧码无 → 0）
   data.abyssFloor = +data.abyssFloor || 0;
   data.caixiaoniao = data.caixiaoniao ? 1 : 0;
   data.worldWarWins = +data.worldWarWins || 0;
@@ -1474,21 +1533,24 @@ function cardHtml(p, opts) {
   } else {
     meta = o.hasWar ? t('metaPower')(p.abyssFloor, kills) : t('metaPowerNoWar')(p.abyssFloor);
   }
+  const rb = rankBadgeHtml(p);
   return `<div class="card ${topCls} ${p.me ? 'me-hl' : ''}" data-key="${esc(p.slotId)}">
     <div class="rank-badge">${p._rank}</div>
     ${playerAvatarHtml(p)}
     <div class="info">
       <div class="nm">${nm}</div>
       ${ttl ? `<div class="ctitle">${ttl}</div>` : ''}
-      <div class="meta">${meta}</div>
+      <div class="meta">${rb ? rb + ' ' : ''}${meta}</div>
     </div>
     <div class="pw"><div class="v ${mcls}">${mv}</div><div class="lb">${mlb}</div>${o.metric === 'kills' ? '' : killsChipHtml(kills)}</div>
   </div>`;
 }
 
-/** 展开详情（slim=true 用于昨日榜快照：快照仅含 party/战力/塔/称号） */
+/** 展开详情（slim=true 用于昨日榜快照：快照仅含 party/战力/塔/称号/段位） */
 function detailHtml(p, slim) {
   const ttl = titleHtml(p.title, true);
+  const rk = playerRankOf(p);
+  const rkText = rk ? rankBadgeText(rk) : '—'; // 「榜内名次」格 → 游戏内 Rank 段位（旧数据无字段 → —）
   const chars = (p.party || []).map(ch => `
     <div class="char">
       ${avatarHtml(ch, 'av')}
@@ -1498,7 +1560,7 @@ function detailHtml(p, slim) {
     </div>`).join('') || `<div style="font-size:10px;color:var(--dim)">${t('noParty')}</div>`;
   const cell = (k, v, hl) => `<div class="cell"><div class="k">${k}</div><div class="v${hl ? ' hl' : ''}">${v}</div></div>`;
   const grid = slim
-    ? `${cell(t('dRank'), p._rank ? '#' + p._rank : '—', true)}
+    ? `${cell(t('dRank'), esc(rkText), !!rk)}
        ${cell(t('lbPower'), fmt(p.power))}
        ${cell(t('dFloor'), (p.abyssFloor || 0) + t('unitF'))}
        ${cell(t('lbKills'), fmt((warReport().standings || []).find(s => s.slotId === p.slotId)?.kills || 0), true)}`
@@ -1506,7 +1568,7 @@ function detailHtml(p, slim) {
        ${cell(t('dEnh'), '+' + (p.maxEnhance || 0))}
        ${cell(t('dCredits'), fmt(p.credits))}
        ${cell(t('dGems'), fmt(p.gems), true)}
-       ${cell(t('dRank'), p.rank ? '#' + p.rank : '—', true)}
+       ${cell(t('dRank'), esc(rkText), !!rk)}
        ${cell(t('dPort'), p.portraitCount || 0)}
        ${cell(t('dFloor'), (p.abyssFloor || 0) + t('unitF'))}
        ${cell(t('dCxN'), p.caixiaoniao ? t('cxnYes') : t('cxnNo'), !!p.caixiaoniao)}`;
@@ -1786,7 +1848,7 @@ function renderMe() {
   el.innerHTML = `
     <div class="medal"><div class="r">${rank ? '#' + rank : '—'}</div><div class="k">${t('meRank')}</div></div>
     <div class="meinfo">
-      <div class="menm">${esc(me.name)}</div>
+      <div class="menm">${esc(me.name)}${rankBadgeHtml(me)}</div>
       <div class="memeta">${t('mePower')} <b>${fmt(me.power)}</b> · ${t('meFloor')} <b>${me.abyssFloor}F</b> · ${t('meKills')} <b>${kills}</b></div>
     </div>
     <div class="mestate ${fresh ? 'can' : 'done'}">${fresh ? '● ' + t('canClaim') : t('claimed')}</div>`;
