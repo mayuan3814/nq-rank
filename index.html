@@ -4,32 +4,46 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#04060e">
-<title>Naomi世界排行 · NAOMI WORLD RANKING</title>
+<title>Naomi量子战纪星路榜 · NAOMI QUANTUM STAR ROAD RANKING</title>
 <!--
 ═══════════════════════════════════════════════════════════════════
-  Naomi世界排行 rank_board.html v3 — 单文件 H5 榜单页（本地模式零依赖全离线 / 线上模式对接 Cloudflare Worker）
+  Naomi量子战纪星路榜 rank_board.html v5 — 单文件 H5 榜单页（线上模式对接 Cloudflare Worker）
   设计: 赛博霓虹 · 量子青 #00f0ff × 霓虹粉 #ff2a8d · 游戏美术资源底图
 
-  【部署配置】部署时只需改下方「模块1 · 配置」:
-    API_BASE  默认 '' = 本地模式（mock 榜兜底）；填入 Cloudflare Worker 地址
-              （如 https://nq-rank-worker.xxx.workers.dev）→ 自动切换线上模式：
-              上榜=POST /rank，榜单=GET /rank 全服真实数据，领奖=GET /reward 服务器签发
-    ART_HERO  首屏英雄区底图（已替换为公网图床 URL，无需自建 OSS）
+  【v5 重做要点】
+  ① 纯真实数据：mock 生成器/演示码入口全删；无数据显示「虚位以待」引导
+  ② 世界大战 v3：昨日快照全员参赛（≥5 人开启，不足显示「满5人明日开战」），
+     每轮随机两两配对单败淘汰（奇数轮空）；每场 = 3v3 逐角色对位对拼
+     （角色战力 ×(0.75+种子随机0.5) ×元素系数：克制1.30/逆克0.85/同元素共鸣1.05，
+     三局两胜，空位不战而败，拖平总战力决胜局）；存活到最后 = 冠军；
+     完整逐回合战斗记录（点玩家卡片展开其全部对战记录 + 完整赛程）；
+     「击败数」（淘汰的玩家数）替代旧胜场数
+  ③ 昨日榜 tab：每日 0 点（UTC+8）Worker 快照结算封存，昨日数据不变，
+     今日上传不影响昨日榜；昨日前 3 名发奖；实时榜无奖励提示「奖励以昨日结算为准」
+  ④ 奖励码回传大按钮：每日礼包区 + 昨日榜奖励区 + 大战冠军区，
+     统一「复制奖励码回游戏」一键复制，回游戏自动识别领奖
+  ⑤ 称号显示：payload.title（字符串 id 或对象均可），移植游戏称号特效 CSS
+     （glow/shimmer/neon/flame/void/rainbow/divine/chaos/glitch/starlight + 高级称号流光贯穿）
+  ⑥ AVATAR_MAP 31 角色全量公网头像
+
+  【部署配置】只需改下方「模块1 · 配置」API_BASE：
+    已预填 https://nq-rank-worker.348438906.workers.dev（线上模式）；
+    清空字符串 '' → 回退本地模式（仅本机数据，全离线可用）
 
   【与游戏端协议（逐字节一致，见 react-vite/src/data/rankData.js & cdkData.js）】
   ① 上榜码: NQCRANK-{base64url(JSON)}-{sig16}
      sig16 = HMAC-SHA256(CDK_SECRET, 'NQCRANK' + payload) 前16位hex大写
      payload(v=1): { v, slotId, name, power, party:[{charId,name,level,stars,power}×3],
        megaCount, maxEnhance, credits, gems, rank, portraitCount,
-       abyssFloor, caixiaoniao, worldWarWins, ts }
+       abyssFloor, caixiaoniao, worldWarWins, ts, title? }
   ② 每日礼包码: NQC-RANK_D1 / RANK_D3 / RANK_D10 / RANK_N-{8hex}-{sig16}
-     sig16 = HMAC-SHA256(CDK_SECRET, type + '-' + payload) 前16位hex大写
-  ③ 世界大战奖励码: NQC-RANK_WW-{ww2hex+6rand}-{sig16}（同上口径）
+     负载 = '00' + ts6hex（encodeRankUploadTs 分钟精度，锚 2026-01-01 UTC）
+  ③ 昨日榜奖励码: 同②（昨日第1→RANK_D1，昨日前3→RANK_D3；ts 锚结算时刻）
+  ④ 世界大战奖励码: NQC-RANK_WW-{击败数2hex + ts6hex}-{sig16}
 
-  【领奖新鲜度规则（v2 新）】每个存档每次上传只能领一次:
-     上榜码 payload.ts 为该次上传时间戳；localStorage 记录每个 slotId 已领过的 ts。
-     领完后按钮锁定并提示「再次上传后可再领」——改系统日期无法刷奖，
-     只有游戏内重新生成上榜码（新 ts）才能解锁下一次领取。
+  【领奖新鲜度规则】每个存档每次上传只能领一次（payload.ts 为锚）；
+  昨日榜/大战奖励码 ts 锚 = max(最近上传ts+1分钟, 结算日23:59 UTC+8)，
+  保证与每日礼包码 ts 链不冲突（建议玩家先领昨日奖再上传今日码）。
 ═══════════════════════════════════════════════════════════════════
 -->
 <style>
@@ -64,10 +78,10 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
   filter:saturate(1.15);transform:scale(1.02)}
 .hero-veil{position:absolute;inset:0;
   background:
-    radial-gradient(120% 90% at 50% 0%,transparent 30%,rgba(4,6,14,.55) 68%,var(--bg) 100%),
-    linear-gradient(180deg,rgba(4,6,14,.42) 0%,rgba(4,6,14,.30) 45%,rgba(4,6,14,.94) 100%),
-    radial-gradient(60% 50% at 12% 8%,rgba(0,240,255,.16),transparent 60%),
-    radial-gradient(55% 45% at 92% 18%,rgba(255,42,141,.16),transparent 60%)}
+    radial-gradient(130% 95% at 50% -8%,transparent 26%,rgba(4,6,14,.62) 66%,var(--bg) 100%),
+    linear-gradient(180deg,rgba(4,6,14,.34) 0%,rgba(4,6,14,.26) 42%,rgba(4,6,14,.96) 100%),
+    radial-gradient(65% 55% at 10% 6%,rgba(0,240,255,.20),transparent 62%),
+    radial-gradient(60% 50% at 94% 16%,rgba(255,42,141,.20),transparent 62%)}
 .hero-inner{position:relative}
 .hero-top{display:flex;align-items:flex-start;gap:10px}
 .hero-title{flex:1;min-width:0}
@@ -132,15 +146,27 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
   box-shadow:0 0 14px rgba(255,42,141,.45)}
 .btn.ghost{background:transparent;color:var(--cyan);border:1px solid var(--line);box-shadow:none}
 .btn[disabled]{opacity:.4;pointer-events:none}
+/* 回传大按钮（复制奖励码回游戏 · 一眼可见） */
+.btn-xl{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  width:100%;min-height:52px;padding:10px 14px;border:none;border-radius:13px;cursor:pointer;
+  background:linear-gradient(135deg,var(--pink),#ff7ab8);color:#1a0210;
+  box-shadow:0 0 22px rgba(255,42,141,.55),0 4px 14px rgba(0,0,0,.4);
+  font-weight:900;letter-spacing:2px;font-size:14px;transition:.15s;position:relative;overflow:hidden;
+  animation:xlpulse 2.2s ease-in-out infinite}
+.btn-xl::before{content:"";position:absolute;top:0;left:-70%;width:45%;height:100%;
+  background:linear-gradient(100deg,transparent,rgba(255,255,255,.22),transparent);
+  transform:skewX(-18deg);animation:meshine 2.6s infinite}
+@keyframes xlpulse{0%,100%{box-shadow:0 0 14px rgba(255,42,141,.45)}50%{box-shadow:0 0 30px rgba(255,42,141,.8)}}
+.btn-xl:active{transform:scale(.97)}
+.btn-xl .xl-sub{font-size:9px;font-weight:600;letter-spacing:1.5px;opacity:.85}
 .codemsg{margin-top:6px;font-size:11px;min-height:14px;letter-spacing:.5px;position:relative}
 .codemsg.ok{color:#3dffa8;text-shadow:0 0 8px rgba(61,255,168,.6)}
 .codemsg.err{color:#ff5d7a;text-shadow:0 0 8px rgba(255,93,122,.6)}
-.demo-link{display:inline-block;margin-top:2px;font-size:9px;color:#43507a;text-decoration:underline;cursor:pointer;position:relative}
 
 /* ─────────── 分榜 Tab ─────────── */
-.tabs{flex:none;display:flex;gap:8px;margin-top:12px}
+.tabs{flex:none;display:flex;gap:7px;margin-top:12px}
 .tabs button{flex:1;background:rgba(10,14,29,.82);border:1px solid var(--line);color:var(--dim);
-  border-radius:12px;padding:9px 0 8px;font-size:13px;letter-spacing:2px;cursor:pointer;transition:.2s;font-weight:600}
+  border-radius:12px;padding:9px 0 8px;font-size:12px;letter-spacing:1px;cursor:pointer;transition:.2s;font-weight:600}
 .tabs button.on{color:var(--cyan);border-color:var(--cyan);
   box-shadow:0 0 16px rgba(0,240,255,.28),inset 0 0 12px rgba(0,240,255,.08);font-weight:800}
 .tabs button small{display:block;font-size:8px;letter-spacing:1px;margin-top:2px;opacity:.7;font-weight:400}
@@ -151,35 +177,46 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
   scrollbar-width:thin;scrollbar-color:var(--cyan) transparent;padding-bottom:76px}
 .board::-webkit-scrollbar{width:4px}
 .board::-webkit-scrollbar-thumb{background:rgba(0,240,255,.35);border-radius:4px}
+/* 榜单卡片：头像左 + 名字称号中 + 战力右 + 击败数小标 */
 .card{scroll-snap-align:start;display:flex;align-items:center;gap:10px;
-  background:var(--panel);border:1px solid rgba(0,240,255,.10);border-radius:12px;
-  padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:.2s;position:relative;overflow:hidden}
+  background:var(--panel);border:1px solid rgba(0,240,255,.10);border-radius:14px;
+  padding:10px 12px;margin-bottom:9px;cursor:pointer;transition:.2s;position:relative;overflow:hidden}
 .card:active{transform:scale(.985)}
-.card .rank-badge{flex:none;width:36px;height:36px;border-radius:10px;display:flex;
+.card .rank-badge{flex:none;width:34px;height:38px;border-radius:11px;display:flex;
   align-items:center;justify-content:center;font-weight:900;font-size:14px;
   background:rgba(255,255,255,.05);color:var(--dim);border:1px solid rgba(255,255,255,.08)}
-/* 前三 金/银/铜 流光 */
-.card.top1 .rank-badge,.card.top2 .rank-badge,.card.top3 .rank-badge{color:#1a1000;border:none;position:relative;overflow:hidden}
-.card.top1 .rank-badge{background:linear-gradient(135deg,#fff3b0,var(--gold) 45%,#b8860b)}
-.card.top2 .rank-badge{background:linear-gradient(135deg,#fff,var(--silver) 45%,#7c8aa0)}
-.card.top3 .rank-badge{background:linear-gradient(135deg,#ffd7b0,var(--bronze) 45%,#8a4a1f)}
-.card.top1 .rank-badge::after,.card.top2 .rank-badge::after,.card.top3 .rank-badge::after{
-  content:"";position:absolute;top:-60%;left:-80%;width:50%;height:220%;
-  background:linear-gradient(105deg,transparent,rgba(255,255,255,.85),transparent);
-  transform:rotate(20deg);animation:shine 2.4s infinite}
-.card.top2 .rank-badge::after{animation-delay:.5s}
-.card.top3 .rank-badge::after{animation-delay:1s}
-@keyframes shine{0%{left:-80%}60%,100%{left:160%}}
+/* 前三 金/银/铜 奖牌图（公网 rank_1/2/3.webp；加载失败自动回退渐变底） */
+.card.top1 .rank-badge,.card.top2 .rank-badge,.card.top3 .rank-badge{
+  color:transparent;border:none;background-color:transparent;
+  background-position:center;background-repeat:no-repeat;background-size:135%;
+  filter:drop-shadow(0 0 10px rgba(255,215,0,.45));transform:scale(1.18)}
+.card.top1 .rank-badge{background-image:url('https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Ff3f906c2cbf06e539cc2849c86d396738484b073b4e87f481369fdb2d7c6ffa2?filename=rank_1.webp&sig=k48OlhJTFlDZm3Dgv_cEXEzhAbvP10zpJ09UVMbPwpM=&t=o'),
+  radial-gradient(circle at 35% 30%,#fff3b0,var(--gold) 55%,#b8860b)}
+.card.top2 .rank-badge{background-image:url('https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F4b6e69869fe21599a476171c864f4243cc683e28cd90c7d5976dbc7747ea950d?filename=rank_2.webp&sig=hHaBIrfXSkG2vw6uUR5_kWcKr2tPlGcNH_Khxtg6isU=&t=o'),
+  radial-gradient(circle at 35% 30%,#fff,var(--silver) 55%,#7c8aa0);filter:drop-shadow(0 0 8px rgba(201,214,232,.5));transform:scale(1.14)}
+.card.top3 .rank-badge{background-image:url('https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F4713796b8eaa37acfb1f3665f175a90575b26b442f8aa23f6081fb45169aab87?filename=rank_3.webp&sig=n0rcdtTBx5TfAojqRw2-OYuI2RATH9X0uBeAlkPRHHM=&t=o'),
+  radial-gradient(circle at 35% 30%,#ffd7b0,var(--bronze) 55%,#8a4a1f);filter:drop-shadow(0 0 8px rgba(224,138,78,.5));transform:scale(1.14)}
 .card.top10{border-color:rgba(0,240,255,.45);box-shadow:0 0 12px rgba(0,240,255,.18),inset 0 0 18px rgba(0,240,255,.05)}
 .card.top1{border-color:rgba(255,215,0,.55);box-shadow:0 0 16px rgba(255,215,0,.25)}
+/* 卡片头像（主队第 1 角色） */
+.cav{flex:none;width:46px;height:46px;border-radius:12px;overflow:hidden;position:relative;
+  border:1px solid rgba(0,240,255,.3);box-shadow:0 0 10px rgba(0,240,255,.15);
+  display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;color:#021014}
+.cav img{width:100%;height:100%;object-fit:cover;display:block}
 .card .info{flex:1;min-width:0}
-.card .nm{font-size:13px;font-weight:700;letter-spacing:.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .nm{font-size:14px;font-weight:800;letter-spacing:.6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card .nm .idtag{font-size:9px;color:var(--pink);font-weight:400}
-.card .meta{font-size:9px;color:var(--dim);margin-top:3px;letter-spacing:.5px}
+.card .ctitle{margin-top:2px;font-size:9px;line-height:1.4;min-height:0}
+.card .meta{font-size:10px;color:var(--dim);margin-top:3px;letter-spacing:.5px}
 .card .meta b{color:var(--cyan);font-weight:600}
-.card .pw{flex:none;text-align:right}
-.card .pw .v{font-size:17px;font-weight:900;letter-spacing:.5px;font-family:ui-monospace,Menlo,monospace}
-.card .pw .lb{font-size:8px;color:var(--dim);letter-spacing:2px}
+.card .pw{flex:none;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+.card .pw .v{font-size:19px;font-weight:900;letter-spacing:.5px;font-family:ui-monospace,Menlo,monospace}
+.card .pw .lb{font-size:8px;color:var(--dim);letter-spacing:1.5px}
+/* 击败数小标 */
+.kchip{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:800;letter-spacing:.5px;
+  color:#ffb3d1;background:rgba(255,42,141,.12);border:1px solid rgba(255,42,141,.4);
+  border-radius:99px;padding:2px 7px;font-family:ui-monospace,Menlo,monospace}
+.kchip svg{flex:none}
 /* 战力 9 档配色（powerData.js QUANTUM_TIERS 移植） */
 .pw0{color:#67e8f9}.pw1{color:#22d3ee}.pw2{color:#60a5fa}.pw3{color:#818cf8}
 .pw4{color:#a78bfa;text-shadow:0 0 10px rgba(167,139,250,.5)}
@@ -193,7 +230,99 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
 /* 我的条目在榜内高亮 */
 .card.me-hl{border-color:var(--pink)}
 .card.me-hl::before{content:"MY";position:absolute;top:0;right:0;font-size:8px;letter-spacing:1px;
-  background:var(--pink);color:#1a0210;padding:2px 8px;border-radius:0 10px 0 8px;font-weight:900}
+  background:var(--pink);color:#1a0210;padding:2px 8px;border-radius:0 10px 0 8px;font-weight:900;z-index:2}
+
+/* ─────────── 称号特效（移植自游戏 HomeScreen TitleDisplay：流光/星辉渐变等） ─────────── */
+.ttl{display:inline-block;position:relative;max-width:100%;border-radius:6px;vertical-align:middle}
+.ttl .title-text{font-weight:900;letter-spacing:.12em;position:relative;display:inline-block;
+  font-size:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;vertical-align:middle}
+.title-effect-glow{color:var(--title-color);text-shadow:0 0 8px var(--title-color),0 0 16px var(--title-color);
+  animation:titleGlow 2s ease-in-out infinite}
+@keyframes titleGlow{
+  0%,100%{text-shadow:0 0 8px var(--title-color),0 0 16px var(--title-color);filter:brightness(1)}
+  50%{text-shadow:0 0 16px var(--title-color),0 0 32px var(--title-color),0 0 48px var(--title-color);filter:brightness(1.3)}}
+.title-effect-glitch{color:var(--title-color);animation:titleGlitch 3s infinite}
+.title-effect-glitch::before,.title-effect-glitch::after{
+  content:attr(data-text);position:absolute;top:0;left:0;width:100%;height:100%}
+.title-effect-glitch::before{color:#ff0040;animation:glitchBefore 3s infinite;
+  clip-path:polygon(0 0,100% 0,100% 45%,0 45%);mix-blend-mode:screen}
+.title-effect-glitch::after{color:#00f0ff;animation:glitchAfter 3s infinite;
+  clip-path:polygon(0 55%,100% 55%,100% 100%,0 100%);mix-blend-mode:screen}
+@keyframes titleGlitch{0%,90%,100%{transform:translate(0)}92%{transform:translate(-2px,1px)}
+  94%{transform:translate(2px,-1px)}96%{transform:translate(-1px,-1px)}98%{transform:translate(1px,1px)}}
+@keyframes glitchBefore{0%,90%,100%{transform:translate(0);opacity:0}92%{transform:translate(3px,-1px);opacity:.8}
+  94%{transform:translate(-2px,1px);opacity:.6}96%{transform:translate(2px,0);opacity:.7}98%{transform:translate(-1px,1px);opacity:0}}
+@keyframes glitchAfter{0%,90%,100%{transform:translate(0);opacity:0}92%{transform:translate(-3px,1px);opacity:.8}
+  94%{transform:translate(2px,-1px);opacity:.6}96%{transform:translate(-2px,0);opacity:.7}98%{transform:translate(1px,-1px);opacity:0}}
+.title-effect-shimmer{color:var(--title-color);
+  background:linear-gradient(90deg,var(--title-color) 0%,#ffffff 45%,#ffffff 55%,var(--title-color) 100%);
+  background-size:200% 100%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  animation:titleShimmer 2.5s linear infinite}
+@keyframes titleShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.title-effect-neon{color:#fff;animation:titleNeon 1.5s ease-in-out infinite alternate}
+@keyframes titleNeon{0%{text-shadow:0 0 4px #fff,0 0 8px var(--title-color),0 0 16px var(--title-color)}
+  100%{text-shadow:0 0 8px #fff,0 0 20px var(--title-color),0 0 40px var(--title-color),0 0 60px var(--title-color)}}
+.title-effect-flame{color:var(--title-color);animation:titleFlame .8s ease-in-out infinite alternate;
+  text-shadow:0 -2px 4px rgba(255,100,0,.8),0 -4px 8px rgba(255,50,0,.6),0 -8px 16px rgba(255,0,0,.4)}
+@keyframes titleFlame{0%{text-shadow:0 -2px 4px rgba(255,100,0,.8),0 -4px 8px rgba(255,50,0,.6);transform:scaleY(1)}
+  50%{text-shadow:0 -4px 8px rgba(255,150,0,.9),0 -8px 16px rgba(255,50,0,.7),0 -12px 24px rgba(255,0,0,.5);transform:scaleY(1.02)}
+  100%{text-shadow:0 -2px 6px rgba(255,80,0,.7),0 -6px 12px rgba(255,30,0,.5);transform:scaleY(.98)}}
+.title-effect-rainbow{background:linear-gradient(90deg,#ff2a8d,#f59e0b,#22c55e,#06b6d4,#3b82f6,#a855f7,#ff2a8d);
+  background-size:300% 100%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  animation:titleRainbow 3s linear infinite}
+@keyframes titleRainbow{0%{background-position:0% 50%}100%{background-position:300% 50%}}
+.title-effect-void{color:var(--title-color);animation:titleVoid 4s ease-in-out infinite}
+@keyframes titleVoid{0%,100%{text-shadow:0 0 8px var(--title-color);filter:brightness(1) contrast(1)}
+  25%{text-shadow:0 0 20px var(--title-color),4px 0 0 #1a0030,-4px 0 0 #0a0020;filter:brightness(1.5) contrast(1.2)}
+  50%{text-shadow:0 0 4px var(--title-color);filter:brightness(.7) contrast(.8)}
+  75%{text-shadow:0 0 20px var(--title-color),-3px 0 0 #1a0030,3px 0 0 #0a0020;filter:brightness(1.3) contrast(1.1)}}
+.title-effect-divine{color:var(--title-color);animation:titleDivine 3s ease-in-out infinite}
+@keyframes titleDivine{0%,100%{text-shadow:0 0 8px var(--title-color),0 0 16px rgba(255,215,0,.5);filter:brightness(1)}
+  33%{text-shadow:0 0 20px var(--title-color),0 0 40px rgba(255,215,0,.8),0 0 60px rgba(255,255,255,.3);filter:brightness(1.5)}
+  66%{text-shadow:0 0 12px var(--title-color),0 0 24px rgba(255,215,0,.6),0 2px 4px rgba(255,255,255,.4);filter:brightness(1.2)}}
+.title-effect-chaos{color:var(--title-color);animation:titleChaos 2s infinite}
+.title-effect-chaos::before{content:attr(data-text);position:absolute;top:0;left:0;color:#ff0040;
+  animation:chaosBefore 1.5s infinite;mix-blend-mode:screen;opacity:.7}
+.title-effect-chaos::after{content:attr(data-text);position:absolute;top:0;left:0;color:#00f0ff;
+  animation:chaosAfter 1.8s infinite;mix-blend-mode:screen;opacity:.7}
+@keyframes titleChaos{0%,80%,100%{transform:translate(0) scale(1);filter:hue-rotate(0deg)}
+  85%{transform:translate(-3px,2px) scale(1.02);filter:hue-rotate(30deg)}
+  90%{transform:translate(3px,-1px) scale(.98);filter:hue-rotate(-30deg)}
+  95%{transform:translate(-2px,-2px) scale(1.01);filter:hue-rotate(60deg)}}
+@keyframes chaosBefore{0%,75%,100%{transform:translate(0)}80%{transform:translate(4px,-2px)}
+  85%{transform:translate(-3px,1px)}90%{transform:translate(2px,2px)}}
+@keyframes chaosAfter{0%,70%,100%{transform:translate(0)}75%{transform:translate(-4px,2px)}
+  80%{transform:translate(3px,-1px)}85%{transform:translate(-2px,-2px)}}
+.title-effect-none{color:var(--title-color)}
+.title-effect-starlight{color:var(--title-color);
+  background:linear-gradient(90deg,var(--title-color) 0%,#fff7d6 40%,#ffffff 50%,#fff7d6 60%,var(--title-color) 100%);
+  background-size:220% 100%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  animation:titleShimmer 3.2s linear infinite,titleStarlightGlow 2.4s ease-in-out infinite}
+@keyframes titleStarlightGlow{0%,100%{filter:drop-shadow(0 0 3px rgba(255,209,102,.55))}
+  50%{filter:drop-shadow(0 0 10px rgba(255,209,102,.95))}}
+.title-star-particle{position:absolute;width:3px;height:3px;border-radius:9999px;background:#ffe9a8;
+  box-shadow:0 0 5px #ffd166,0 0 9px rgba(255,209,102,.6);pointer-events:none;
+  animation:titleStarTwinkle ease-in-out infinite}
+@keyframes titleStarTwinkle{0%,100%{opacity:.1;transform:scale(.5)}50%{opacity:1;transform:scale(1.2)}}
+/* 高级称号「流光贯穿」：光带周期左右扫过（overlay 零布局占位） */
+.title-stream-fx{position:absolute;left:-14%;right:-14%;top:0;bottom:0;overflow:hidden;pointer-events:none;border-radius:10px}
+.title-stream-band{position:absolute;top:0;bottom:0;left:0;width:34%;
+  -webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 30%,#000 70%,transparent 100%);
+  mask-image:linear-gradient(180deg,transparent 0%,#000 30%,#000 70%,transparent 100%);
+  mix-blend-mode:screen;transform:translateX(-170%) skewX(-16deg);
+  animation:titleStreamSweep 3.4s cubic-bezier(.45,.05,.35,.95) infinite;will-change:transform,opacity}
+.title-stream-band-rev{width:22%;animation-name:titleStreamSweepRev}
+@keyframes titleStreamSweep{0%{transform:translateX(-170%) skewX(-16deg);opacity:0}12%{opacity:1}
+  52%{opacity:1}72%{opacity:0}100%{transform:translateX(500%) skewX(-16deg);opacity:0}}
+@keyframes titleStreamSweepRev{0%,34%{transform:translateX(720%) skewX(16deg);opacity:0}44%{opacity:.75}
+  78%{opacity:.75}92%{opacity:0}100%{transform:translateX(-240%) skewX(16deg);opacity:0}}
+.title-stream-spark{position:absolute;width:2.5px;height:2.5px;border-radius:9999px;pointer-events:none;
+  animation:titleStreamSpark ease-in-out infinite}
+@keyframes titleStreamSpark{0%,100%{opacity:.08;transform:scale(.5)}50%{opacity:.95;transform:scale(1.15)}}
+/* 详情区称号大图 */
+.dtitle{text-align:center;padding:2px 0 10px;margin-bottom:10px;border-bottom:1px solid rgba(0,240,255,.10);position:relative}
+.dtitle .ttl{font-size:14px;overflow:visible}
+.dtitle .tst{margin-top:2px;font-size:8px;color:var(--dim);letter-spacing:1px;font-family:ui-monospace,Menlo,monospace}
 
 /* 展开详情 */
 .detail{margin:-4px 0 10px;background:rgba(6,9,20,.94);border:1px solid rgba(0,240,255,.22);
@@ -216,24 +345,100 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
 .dgrid .v{font-size:11px;font-weight:700;color:var(--txt);margin-top:2px;font-family:ui-monospace,Menlo,monospace}
 .dgrid .v.hl{color:var(--pink)}
 
-/* 世界大战战报卡（WW Tab 顶部） */
+/* ─────────── 世界大战 / 昨日榜 战报卡 ─────────── */
 .ww-report{scroll-snap-align:start;background:linear-gradient(120deg,rgba(255,42,141,.14),rgba(6,9,20,.94));
   border:1px solid rgba(255,42,141,.35);border-radius:12px;padding:12px;margin-bottom:10px}
 .ww-report .wt{font-size:11px;letter-spacing:2px;color:var(--pink);font-weight:800;display:flex;align-items:center;gap:7px}
 .ww-report .wt::before{content:"";width:7px;height:7px;background:var(--pink);box-shadow:0 0 8px var(--pink);transform:rotate(45deg)}
+.ww-report .wt .date{margin-left:auto;font-size:9px;color:var(--dim);letter-spacing:1px;font-weight:400}
 .ww-champ{display:flex;align-items:center;gap:10px;margin-top:9px}
-.ww-champ .crown{font-size:22px;filter:drop-shadow(0 0 8px var(--gold))}
+.crown-img{width:40px;height:40px;object-fit:contain;flex:none;
+  filter:drop-shadow(0 0 10px rgba(255,215,0,.55))}
 .ww-champ .who{font-size:13px;font-weight:800}
 .ww-champ .sub2{font-size:9px;color:var(--dim);margin-top:2px}
 .ww-code{margin-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:10px;color:var(--cyan);
   word-break:break-all;background:rgba(0,0,0,.5);border:1px dashed rgba(0,240,255,.4);
-  border-radius:8px;padding:8px 10px;letter-spacing:.5px}
+  border-radius:8px;padding:8px 10px;letter-spacing:.5px;cursor:pointer}
 .ww-hint{margin-top:7px;font-size:9px;color:var(--gold);letter-spacing:1px}
+.ww-act{margin-top:10px}
+.ww-meta-row{display:flex;gap:8px;margin-top:9px}
+.ww-meta-cell{flex:1;background:rgba(0,240,255,.05);border:1px solid rgba(0,240,255,.12);border-radius:9px;
+  padding:7px 6px;text-align:center}
+.ww-meta-cell .k{font-size:8px;color:var(--dim);letter-spacing:1px}
+.ww-meta-cell .v{font-size:13px;font-weight:900;color:var(--cyan);margin-top:2px;font-family:ui-monospace,Menlo,monospace}
+/* 未开启 / 结算中 */
+.ww-gate{margin-top:9px;text-align:center;padding:14px 10px;border:1px dashed rgba(255,42,141,.4);border-radius:10px}
+.ww-gate .g1{font-size:13px;color:var(--pink);letter-spacing:2px;font-weight:800}
+.ww-gate .g2{margin-top:5px;font-size:10px;color:var(--dim);line-height:1.8}
+.ww-gate .gbar{margin:9px auto 0;width:78%;height:7px;border-radius:99px;background:rgba(255,255,255,.07);overflow:hidden}
+.ww-gate .gbar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--pink),var(--cyan));
+  box-shadow:0 0 10px rgba(255,42,141,.6)}
+/* 今日预告条 */
+.ww-preview{margin-top:10px;font-size:9px;color:var(--dim);letter-spacing:1px;text-align:center;
+  border-top:1px solid rgba(255,42,141,.18);padding-top:8px}
+.ww-preview b{color:var(--cyan)}
+
+/* 世界大战：参赛者对战记录展开 */
+.wlog{margin:-4px 0 10px;background:rgba(6,9,20,.94);border:1px solid rgba(255,42,141,.28);
+  border-top:none;border-radius:0 0 12px 12px;padding:11px 12px;animation:drop .25s ease}
+.wlog .wl-cap{font-size:9px;letter-spacing:2px;color:var(--pink);font-weight:800;opacity:.9}
+.wl-match{margin-top:8px;background:rgba(3,6,14,.55);border:1px solid rgba(0,240,255,.14);border-radius:9px;padding:8px 10px}
+.wl-mhead{display:flex;align-items:baseline;gap:7px;font-size:11px;font-weight:700;letter-spacing:.5px}
+.wl-mhead .rn{flex:none;font-size:8px;font-weight:900;font-family:ui-monospace,Menlo,monospace;
+  color:var(--dim);border:1px solid rgba(122,139,176,.35);border-radius:5px;padding:1px 5px}
+.wl-mhead .sc{margin-left:auto;font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:900}
+.wl-mhead.win .sc{color:#3dffa8;text-shadow:0 0 8px rgba(61,255,168,.5)}
+.wl-mhead.lose .sc{color:#ff8ba3}
+.wl-mhead .foe{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wl-mhead .foe i{font-style:normal;color:var(--pink);font-size:9px;letter-spacing:1px;margin:0 5px}
+.wl-bye{margin-top:8px;font-size:10px;color:var(--gold);letter-spacing:1px;
+  border:1px dashed rgba(255,215,0,.35);border-radius:9px;padding:7px 10px;text-align:center}
+.wb-r{display:flex;align-items:baseline;gap:8px;margin-top:6px;font-size:10px;letter-spacing:.3px;line-height:1.5}
+.wb-r .rn{flex:none;font-size:8px;font-weight:900;font-family:ui-monospace,Menlo,monospace;
+  color:var(--dim);border:1px solid rgba(122,139,176,.35);border-radius:5px;padding:1px 5px}
+.wb-r.w{color:#3dffa8}
+.wb-r.l{color:#ff8ba3}
+.wb-r .etag{flex:none;font-size:8px;font-weight:800;letter-spacing:1px;border-radius:4px;padding:0 4px;margin-left:2px}
+.etag.adv{color:#3dffa8;border:1px solid rgba(61,255,168,.45)}
+.etag.dis{color:#ffb3d1;border:1px solid rgba(255,42,141,.45)}
+.etag.res{color:var(--gold);border:1px solid rgba(255,215,0,.45)}
+.etag.bye{color:var(--dim);border:1px solid rgba(122,139,176,.4)}
+.wb-r .cw{font-weight:800}
+.wl-elim{margin-top:8px;font-size:9px;color:var(--dim);letter-spacing:1px;text-align:center}
+.wl-elim b{color:var(--gold)}
+/* 完整赛程（折叠） */
+.bracket{margin-top:10px}
+.bracket .br-tog{width:100%;background:rgba(0,240,255,.05);border:1px solid rgba(0,240,255,.18);color:var(--cyan);
+  border-radius:10px;padding:8px 0;font-size:10px;letter-spacing:2px;cursor:pointer;font-weight:700}
+.bracket .br-tog small{display:block;font-size:8px;color:var(--dim);margin-top:2px;letter-spacing:1px;font-weight:400}
+.br-body{display:none;margin-top:8px}
+.bracket.open .br-body{display:block}
+.br-round{margin-top:8px}
+.br-rn{font-size:9px;letter-spacing:2px;color:var(--cyan);font-weight:800;opacity:.85}
+.wwm{margin-top:6px;background:rgba(3,6,14,.55);border:1px solid rgba(0,240,255,.12);border-radius:9px;
+  padding:7px 10px;cursor:pointer}
+.wwm .wl-mhead{font-size:10px}
+.wwm .mrounds{display:none}
+.wwm.open .mrounds{display:block}
+.wwm .mwin{font-weight:900;color:#3dffa8}
+.wwm .mlose{color:#7a8bb0}
+
+/* 昨日榜 */
+.y-head{scroll-snap-align:start;background:linear-gradient(120deg,rgba(255,215,0,.12),rgba(6,9,20,.94));
+  border:1px solid rgba(255,215,0,.35);border-radius:12px;padding:12px;margin-bottom:10px}
+.y-head .wt{font-size:11px;letter-spacing:2px;color:var(--gold);font-weight:800;display:flex;align-items:center;gap:7px}
+.y-head .wt::before{content:"";width:7px;height:7px;background:var(--gold);box-shadow:0 0 8px var(--gold);transform:rotate(45deg)}
+.y-head .wt .date{margin-left:auto;font-size:9px;color:var(--dim);letter-spacing:1px;font-weight:400}
+.y-seal{margin-top:7px;font-size:9px;color:var(--dim);letter-spacing:1px}
+.y-reward{margin-top:10px;background:rgba(255,215,0,.06);border:1px solid rgba(255,215,0,.28);border-radius:11px;padding:11px 12px}
+.y-reward .t{font-size:11px;color:var(--gold);letter-spacing:1px;font-weight:800}
+.y-reward .r{font-size:13px;font-weight:800;color:#fff;margin-top:3px}
+.y-reward .ww-hint{color:var(--dim)}
 
 /* 空态 / 骨架 */
 .empty{text-align:center;padding:26px 20px;border:1px dashed rgba(0,240,255,.3);border-radius:14px;margin-bottom:10px;
   background:rgba(8,12,26,.6)}
-.empty .ico{font-size:30px;filter:drop-shadow(0 0 12px var(--cyan))}
+.empty .ico{display:flex;justify-content:center;filter:drop-shadow(0 0 12px rgba(0,240,255,.45))}
 .empty .p1{margin-top:8px;font-size:13px;color:var(--cyan);letter-spacing:2px}
 .empty .p2{margin-top:5px;font-size:10px;color:var(--dim);line-height:1.8}
 .skel{display:flex;gap:10px;align-items:center;padding:11px 12px;margin-bottom:8px;
@@ -241,7 +446,8 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
 .skel i{display:block;border-radius:8px;background:linear-gradient(90deg,rgba(255,255,255,.05),rgba(255,255,255,.12),rgba(255,255,255,.05));
   background-size:200% 100%;animation:sk 1.2s infinite}
 @keyframes sk{to{background-position:-200% 0}}
-.board-foot{text-align:center;font-size:9px;color:#43507a;letter-spacing:1px;padding:6px 0 4px}
+.board-foot{text-align:center;font-size:9px;color:#43507a;letter-spacing:1px;padding:6px 0 4px;line-height:1.9}
+.board-foot .noreward{color:#5a6b94}
 
 /* ─────────── 每日礼包悬浮卡 ─────────── */
 .fab{position:fixed;right:16px;bottom:calc(18px + env(safe-area-inset-bottom));z-index:40;
@@ -275,12 +481,12 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
 .giftcode .code{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--cyan);
   word-break:break-all;background:rgba(0,0,0,.5);border:1px dashed rgba(0,240,255,.4);
   border-radius:9px;padding:10px 11px;letter-spacing:.5px}
-.giftcode .row{display:flex;gap:8px;margin-top:9px;align-items:center}
-.giftcode .hint{font-size:9px;color:var(--dim);letter-spacing:.5px;line-height:1.6}
+.giftcode .hint{font-size:9px;color:var(--dim);letter-spacing:.5px;line-height:1.6;margin-top:7px;text-align:center}
 .gift-done{margin-top:10px;font-size:11px;color:#3dffa8;letter-spacing:.5px;display:none;line-height:1.7}
 .gift-done .re{display:block;color:var(--dim);font-size:9px;margin-top:2px}
 .gift-none{margin-top:11px;font-size:11px;color:var(--dim);text-align:center;padding:14px 10px;
   border:1px dashed rgba(122,139,176,.3);border-radius:10px;line-height:1.8}
+.gift-note{margin-top:10px;font-size:9px;color:#5a6b94;letter-spacing:1px;text-align:center;line-height:1.7}
 
 /* Toast */
 #toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%) translateY(20px);
@@ -288,6 +494,23 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
   padding:10px 22px;border-radius:99px;font-size:12px;letter-spacing:1.5px;opacity:0;
   pointer-events:none;transition:.3s;z-index:99;box-shadow:0 0 20px rgba(0,240,255,.35);max-width:86vw;text-align:center}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ─────────── 量子同步 loading（量子环旋转） ─────────── */
+#qload{position:fixed;inset:0;z-index:120;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:rgba(2,4,10,.72);backdrop-filter:blur(6px);
+  opacity:0;pointer-events:none;transition:opacity .25s}
+#qload.show{opacity:1;pointer-events:auto}
+.ql-ring{position:relative;width:88px;height:88px}
+.ql-ring i{position:absolute;inset:0;border-radius:50%;border:2px solid transparent}
+.ql-ring i:nth-child(1){border-top-color:var(--cyan);border-right-color:rgba(0,240,255,.25);animation:qlspin 1.1s linear infinite}
+.ql-ring i:nth-child(2){inset:12px;border-bottom-color:var(--pink);border-left-color:rgba(255,42,141,.25);animation:qlspin .9s linear infinite reverse}
+.ql-ring i:nth-child(3){inset:24px;border-top-color:#9fd8ff;animation:qlspin 1.6s linear infinite}
+.ql-ring b{position:absolute;inset:38px;border-radius:50%;background:var(--cyan);
+  box-shadow:0 0 18px var(--cyan),0 0 40px rgba(0,240,255,.5);animation:qlcore 1.2s ease-in-out infinite}
+@keyframes qlspin{to{transform:rotate(360deg)}}
+@keyframes qlcore{50%{transform:scale(.55);opacity:.7}}
+.ql-txt{margin-top:18px;font-size:12px;letter-spacing:3px;color:var(--cyan);
+  text-shadow:0 0 12px rgba(0,240,255,.6);animation:blink 1.4s infinite}
 </style>
 </head>
 <body>
@@ -300,8 +523,8 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
     <div class="hero-inner">
       <div class="hero-top">
         <div class="hero-title">
-          <h1 id="uiTitle">Naomi世界排行</h1>
-          <div class="sub" id="uiSub">NAOMI QUANTUM CHRONICLE · WORLD RANKING</div>
+          <h1 id="uiTitle">Naomi量子战纪星路榜</h1>
+          <div class="sub" id="uiSub">NAOMI QUANTUM CHRONICLE · STAR ROAD RANKING</div>
           <div class="live"><i></i><span id="uiLive">OFFLINE LEAGUE · SEASON ∞</span></div>
         </div>
         <div class="langs" id="langBox">
@@ -314,7 +537,6 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
         <button class="btn" id="codeBtn"></button>
       </div>
       <div class="codemsg" id="codeMsg"></div>
-      <span class="demo-link" id="demoLink"></span>
     </div>
   </header>
 
@@ -322,6 +544,7 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
   <nav class="tabs">
     <button class="on" data-tab="power"><span class="tt" data-tt="tabPower"></span><small>POWER</small></button>
     <button data-tab="boss"><span class="tt" data-tt="tabBoss"></span><small>ABYSS</small></button>
+    <button data-tab="yday"><span class="tt" data-tt="tabYday"></span><small>YESTERDAY</small></button>
     <button data-tab="ww"><span class="tt" data-tt="tabWw"></span><small>WAR</small></button>
   </nav>
 
@@ -330,7 +553,7 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
 </div>
 
 <!-- ═══ 每日礼包悬浮卡 ═══ -->
-<button class="fab" id="giftFab">🎁<span class="dot" id="giftDot" style="display:none"></span></button>
+<button class="fab" id="giftFab" aria-label="daily gift"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#ffd700" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="8.5" width="17" height="12" rx="2"/><path d="M12 8.5v12M3.5 13h17M12 8.5s-4.5.3-5.5-2.2C5.8 4.6 8 3 9.8 4c1.8 1 2.2 4.5 2.2 4.5s.4-3.5 2.2-4.5C16 3 18.2 4.6 17.5 6.3c-1 2.5-5.5 2.2-5.5 2.2z"/></svg><span class="dot" id="giftDot" style="display:none"></span></button>
 <div class="sheet-mask" id="sheetMask"></div>
 <div class="sheet" id="giftSheet">
   <div class="grab"></div>
@@ -339,6 +562,12 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
 </div>
 
 <div id="toast"></div>
+
+<!-- ═══ 量子同步 loading（上传上榜码时显示，成功自动刷新榜单） ═══ -->
+<div id="qload" aria-hidden="true">
+  <div class="ql-ring"><i></i><i></i><i></i><b></b></div>
+  <div class="ql-txt" id="qloadTxt">量子同步中</div>
+</div>
 
 <script>
 'use strict';
@@ -421,23 +650,66 @@ function sign16(msg) { return hmacSha256Hex(CDK_SECRET_HEX, msg).slice(0, 16).to
 /* ═══════════════════════════════════════════════════════════════
    模块 1 · 配置（★ 部署时改这里 ★）
    ═══════════════════════════════════════════════════════════════ */
-/** ★★ 线上后端：填入你的 Cloudflare Worker 地址（结尾不带 /）即自动切换线上模式；留空 = 本地模式 ★★ */
-const API_BASE = 'https://nq-rank-worker.348438906.workers.dev'; // 例: 'https://nq-rank-worker.你的账号.workers.dev'
+/** ★★ 线上后端：已预填部署好的 Cloudflare Worker；清空字符串 = 回退本地模式（仅本机数据） ★★ */
+const API_BASE = 'https://nq-rank-worker.348438906.workers.dev';
 const ONLINE = !!API_BASE;
 
-/** 美术资源（已替换为公网图床 URL，无需自建 OSS；本地开发可改回相对路径） */
-const ART_BASE = '/images/art_v2/';
+/** 美术资源（公网图床 URL，无需自建 OSS） */
 const ART_HERO = 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Ff9f2267b3d527b46ddd8a95d912beda116a9a1b7065f6b08636dfae6a699e049?filename=splash_jeff_farewell.webp&sig=vo27FBcs3ekAzJV4ZQjXjawKoE0HSasAeyNL1drlIy0=&t=o';
 const ART_HERO_FALLBACK = 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F42b1d1b9a58f6d5da16afec74ffe7ac70324252417547f21278588a4f4aa1a8c?filename=naomi_full.webp&sig=6M_B-FqqN_eKfKbYFom8Cx7WKls-n4VxomwajSPvfLU=&t=o';
-const AVATAR_BASE = ART_BASE + 'characters/';
-const AVATAR_SUFFIX = '_avatar.webp';
+/** 角色头像公网映射（31 角色全量，art_v2/characters/*_avatar.webp 已上传图床） */
+const AVATAR_MAP = {
+  naomi: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F5e9deb7e23b35fc6c17915c46f7abd7c8ab639bbd04947a1a67c594fdcc01b7f?filename=naomi_avatar.webp&sig=Dp_ThRnfqnmgLNLQdynz1mcvm6y-Bxu5D5LdOVkmX_s=&t=o',
+  rin: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fd58111d0db7219e6fffa2339b7a1b550c805b90e9ec1ed08bb903bb62955e7a9?filename=rin_avatar.webp&sig=gQxQzoxJhIkDzF1G_9jMfp4Sd8o8TKr45IZdRj2xBsk=&t=o',
+  sora: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F182ce04c486ba383eaa33865fa1ebd4f25ac06115763f37bdb3ba7bf2e861a59?filename=sora_avatar.webp&sig=vv3Xvg6co7u5GRoiDO_ztrNx6-T_Cv_LZYyagURNv9M=&t=o',
+  akira: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F13addd93008ad739d61417115669d91983c237e347f5c809ad82543035e9191d?filename=akira_avatar.webp&sig=75FjOab11lLQA3fJD0ZxZc7Qu-kugCFacaOr-o2PU1s=&t=o',
+  yuki: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fcd31858fcf01a7fc2df6fa56463b3ff6b0773af41a5b8bde0d11836f1668d47c?filename=yuki_avatar.webp&sig=xh1AE5CbMgZlIEC8XQtbKZX-cGpDhFAswb64Eyb-JZQ=&t=o',
+  hikari: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F3f5541ac7ea01fc635eac2a73ae28d650bcc72f70f1f9b9bee73740b93ba2fab?filename=hikari_avatar.webp&sig=DaXnRFGup3w55jLt4EIjphhrzb-Wtu14jLKv5o9VWXs=&t=o',
+  ren: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F122444a8dce16fa6558503961d6b49fc04c6fd7b69aad31da8356abb3c39b609?filename=ren_avatar.webp&sig=gYH927OudkKAFe9F6-0-UqSfWYTsw3FdLaTLCKq4Eys=&t=o',
+  kaede: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F30f3437834f0be584065721cfc43743e6fabf52b030ecde5c83e2d926f9beedb?filename=kaede_avatar.webp&sig=JxxujXNKncqo9ORuNvUpge-5q5fvewriemn0HYzPkPE=&t=o',
+  mei: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fca3216507f8b0db061b26256c605120346d2f34a0e96b5f0f8de9389d70e44b9?filename=mei_avatar.webp&sig=_Z3WSPxgrffRyvMgGqjAC8UIzJh8S-iduN9KXnWUtHo=&t=o',
+  echo: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F8b743294d697af62274f2541d7912da9d6777ebae95bd113b1fd8766ce9dc4b3?filename=echo_avatar.webp&sig=bULNwLKbVeqXLTOPDM0qPghMyIsq6zx35qVd0PFTlzc=&t=o',
+  annie: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fb1fb3548067af9bef16392d03f929c70808d29ac565fb24f721f12dbb9522a5e?filename=annie_avatar.webp&sig=6drIpUZuxB6H4AcTwebd6h0Z907Bd_TjiUWzzSZYA8w=&t=o',
+  gaia: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fa73e88a9f1a6fbbdd3e0aa606f7dade7d044c6a2d7090569c79f9af91b7ee92b?filename=gaia_avatar.webp&sig=in8I9h4WkiPDfPPIsHyKCESyekGRKz1zlGna934mcYM=&t=o',
+  jin: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F9e3d066179bb1dbd512e5ab10b1781f7516f82620e8b93dd67362bd9eef9c84b?filename=jin_avatar.webp&sig=6jIyj9xRuLaf-IkndF2z3Gh3jNYLgrGacyh8utGOELM=&t=o',
+  jie: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fd0f40f0f696ef16b192c29cdf1e29a3d5f5291de65b63e013d6431ba10c73c1c?filename=jie_avatar.webp&sig=bsO0qBMuUe3OdpYFCcC_uhgQ7hW5nTVvGYPwV8DsnTg=&t=o',
+  kuro: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fcf64eb7ae291b45a2c8018604b1aa98d01906ad9bc6e6ae2588bf4a0aba9acc9?filename=kuro_avatar.webp&sig=xOkAiPAmJlSkYBvrlBVyPN6PWLFJrvaiY1TNWksekrY=&t=o',
+  tsuki: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F12e6717ec01060a51a47703e03316238ed86b79502c6bf370ba4452b859c0947?filename=tsuki_avatar.webp&sig=Pn0QiIMF28ZiEO9AAOzsM5KyTRdTpiUguzSD-KWG0PM=&t=o',
+  jony: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Febceb2120cdf395496ec6755b9382aac37b2b4fcc71f356a6f8c797b89b7ee18?filename=jony_avatar.webp&sig=GQ832OGHI9Q5mPTtjVVxfuKURW16GdLZZbp1Pcp9njI=&t=o',
+  raiden: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F6dc54c380b595421e3a0e12bb8c33359cebc665599f1bc61ad0af4a3670b0b71?filename=raiden_avatar.webp&sig=01382_2wtiiTewTGhtdxjF9-evOxgJVRq0cO0qy_RZE=&t=o',
+  shaan: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F88630761792730372b8e5e8f6f7b6b716c5b8dedd3ab0f106ec1a6fb70be5707?filename=shaan_avatar.webp&sig=C7TwPV1DuppUWTjm3u8Uzht8AgKiGMCzmqrB2L0lKcQ=&t=o',
+  jeff: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F04be45e5cbc28007e89f38af3b7e957935c2af46fb805afd19add05265d6d30f?filename=jeff_avatar.webp&sig=3pXHvDFdxeTFWv2kxQoHvu4A7Yy1GoMo4B9UfTzN_uA=&t=o',
+  mega_arthur: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F83749261e7328653b73e6c9a53a04a95066a918b3ea73204a228906d38c930d6?filename=mega_arthur_avatar.webp&sig=XFWkqpeM4Ky7BxwcfLCe0xPa8WaYtDzAUpobGS0JysU=&t=o',
+  rom1_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F782f93ef33bf72e75c35efecdd5341102119cf673416650a0b0eb92cb65387c2?filename=rom1_battle_avatar.webp&sig=lN-aYXBm0rVm_ZeIcuDDZ1B4YOp_H9S3V2LLV0qE3z4=&t=o',
+  rom2_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Ff0bf408764912779ea0bcf3d7e326878663d07a27640c7a1f1d94fe535952911?filename=rom2_battle_avatar.webp&sig=Z-D5TauW5-wFz4AACElG7Y06cxl47if1jcCWEeV866k=&t=o',
+  rom3_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F82ba16df2cfb6531f6f5dec98e66c0473280fc08df365703000370a8d7d1d76d?filename=rom3_battle_avatar.webp&sig=qESTeP77aHoiWTL3Es6b9X26YZZY9apJ4L_RyAHzy8M=&t=o',
+  rom4_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F1b8b93afc692c7b450aa833fe7bb4f5b8bb92a84233418db5c8f9877d3879c96?filename=rom4_battle_avatar.webp&sig=nkgp4Xm7754Bb6n5vRFV77_m4iEB_sJJr2XhO3aVtF4=&t=o',
+  rom5_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F89e3e46a096a9be6621074186bfffb0d3c34e47e76675c38ae8927af2564703b?filename=rom5_battle_avatar.webp&sig=-5H4VqwsbCo0XaBXluOsWnFl15nzdFZh-Z7LPbennWo=&t=o',
+  rom6_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fe2c383c188afbef163f3b03af8337012c4f7f29d1c62fb0150c040ccf287c1b7?filename=rom6_battle_avatar.webp&sig=ILzUTcEFPwe5VYDfSl4MoQTDbc70xXFulKT3VYB5JLU=&t=o',
+  liuyan_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Ff0e4bac94e68c7ffdec2794a5e8e297e72ef013a93bb5f073aa08a8278506fa5?filename=liuyan_battle_avatar.webp&sig=DlY5fSWCkAENnyg_cXHMB84zobetykESW3DB2vdKtdA=&t=o',
+  liubeiqiao_battle: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F4bae3e3f8a0664491fd25741e13d8a824078e25ac1585f2e9a84382c169570d8?filename=liubeiqiao_battle_avatar.webp&sig=D96z3QAsljQRFPHiazQa0gxRQW5ZCoXgQ1kgHZxaKB0=&t=o',
+  mega_jun: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F93e68533bb136ff9976f5955655d70b1773e7ece510530386b7cebd45db370bf?filename=mega_jun_avatar.webp&sig=EzEUPU6kImbqM4Zmmr92-1wkOQwCcb8jIMBMG709r4k=&t=o',
+  mega_william: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F96e9f5a283f4bc7c28b4d9e621f8837ead9dce707d4e20a2bae648886536c4ee?filename=mega_william_avatar.webp&sig=NbLTGEawP-D9pz9Q8QxVe9ffMD_fUaKQ0FzF1s2p3o0=&t=o',
+};
+/** 前三奖牌公网图（art_v2/icons/rank_*.webp 已上传） */
+const RANK_MEDAL = {
+  1: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Ff3f906c2cbf06e539cc2849c86d396738484b073b4e87f481369fdb2d7c6ffa2?filename=rank_1.webp&sig=k48OlhJTFlDZm3Dgv_cEXEzhAbvP10zpJ09UVMbPwpM=&t=o',
+  2: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F4b6e69869fe21599a476171c864f4243cc683e28cd90c7d5976dbc7747ea950d?filename=rank_2.webp&sig=hHaBIrfXSkG2vw6uUR5_kWcKr2tPlGcNH_Khxtg6isU=&t=o',
+  3: 'https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2F4713796b8eaa37acfb1f3665f175a90575b26b442f8aa23f6081fb45169aab87?filename=rank_3.webp&sig=n0rcdtTBx5TfAojqRw2-OYuI2RATH9X0uBeAlkPRHHM=&t=o',
+};
 
-/** 战力 9 档（powerData.js QUANTUM_TIERS 移植 → CSS 类 pw0..pw8） */
-const POWER_TIER_MINS = [0, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000];
+/** 战力 9 档（与游戏满配量级一致：满配约 4.5万-5.5万 → CSS 类 pw0..pw8） */
+const POWER_TIER_MINS = [0, 1000, 2500, 5000, 10000, 18000, 28000, 40000, 52000];
 function powerTier(v) {
   for (let i = POWER_TIER_MINS.length - 1; i >= 0; i--) if (v >= POWER_TIER_MINS[i]) return i;
   return 0;
 }
+
+/** 内联 SVG 图标（全页去 emoji：图标一律 SVG/CSS） */
+const SVG_GIFT = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#ffd700" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="8.5" width="17" height="12" rx="2"/><path d="M12 8.5v12M3.5 13h17M12 8.5s-4.5.3-5.5-2.2C5.8 4.6 8 3 9.8 4c1.8 1 2.2 4.5 2.2 4.5s.4-3.5 2.2-4.5C16 3 18.2 4.6 17.5 6.3c-1 2.5-5.5 2.2-5.5 2.2z"/></svg>';
+const SVG_GLOBE = '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="#00f0ff" stroke-width="1.4" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 2.6 4 5.7 4 9s-1.2 6.4-4 9c-2.8-2.6-4-5.7-4-9s1.2-6.4 4-9z"/></svg>';
+const SVG_SWORD = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="#ffb3d1" stroke-width="2.2" stroke-linecap="round"><path d="M4 20L14.5 9.5M13 4l7 7-2.5 2.5-7-7L13 4zM4 20l2.5-.5L6 17l-2 3z"/></svg>';
+const SVG_SEAL = '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="#ffd700" stroke-width="1.4" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 12l2.5 2.5L16 9"/></svg>';
 /** 每日礼包档位（rankData.js RANK_DAILY_TIERS 同口径） */
 const GIFT_TIERS = [
   { maxRank: 1,        type: 'RANK_D1',  gems: 50, credits: 50000 },
@@ -446,135 +718,330 @@ const GIFT_TIERS = [
   { maxRank: Infinity, type: 'RANK_N',   gems: 5,  credits: 5000  },
 ];
 
+/** 上榜 ts 编码（与 cdkData.js encodeRankUploadTs 同口径：分钟精度，锚 2026-01-01 UTC） */
+const RANK_TS_EPOCH_SEC = 1767225600;
+function encodeRankUploadTs(tsMs) {
+  const sec = Number.isFinite(tsMs) ? Math.floor(tsMs / 1000) : RANK_TS_EPOCH_SEC;
+  const deltaMin = Math.max(0, Math.floor((sec - RANK_TS_EPOCH_SEC) / 60));
+  return Math.min(0xFFFFFF, deltaMin).toString(16).toUpperCase().padStart(6, '0');
+}
+
+/** 角色主元素（elementData.js CHARACTER_ELEMENTS，31 人；世界大战模拟用） */
+const CHAR_ELEMENT = {
+  naomi: 'quantum', ren: 'blaze', yuki: 'frost', kuro: 'void', kaede: 'blaze',
+  jin: 'thunder', akira: 'quantum', mei: 'holy', raiden: 'thunder', sora: 'void',
+  echo: 'void', hikari: 'holy', tsuki: 'void', rin: 'quantum', gaia: 'holy',
+  jeff: 'quantum', annie: 'blaze', jie: 'holy', jony: 'void', shaan: 'holy',
+  rom1_battle: 'frost', rom2_battle: 'thunder', rom3_battle: 'frost', rom4_battle: 'blaze',
+  rom5_battle: 'void', rom6_battle: 'void', liuyan_battle: 'blaze', liubeiqiao_battle: 'quantum',
+  mega_arthur: 'quantum', mega_william: 'void', mega_jun: 'holy',
+};
+
+/** 称号表（progressionData.js TITLES 全量 75 项：[id, 中文, 日文, 英文, 特效, 颜色, tier]） */
+const TITLE_ROWS = [
+["title_s1","觉醒者","覚醒者","Awakened","glow","#00f0ff",1],
+["title_b1","新兵","新兵","Recruit","glow","#22c55e",1],
+["title_c1","同志","同志","Comrade","none","#9ca3af",1],
+["title_p1","饲养员","飼い主","Pet Owner","glow","#4ade80",1],
+["title_s2","故事传述者","物語の語り部","Storyteller","shimmer","#a855f7",2],
+["title_b2","战场老兵","戦場のベテラン","Battlefield Veteran","neon","#3b82f6",2],
+["title_d1","羁绊守护者","絆の守護者","Bond Guardian","shimmer","#ec4899",2],
+["title_c4","武装收藏家","武装蒐集家","Arms Collector","glow","#f59e0b",2],
+["title_s3","prism战士","prismの戦士","prism Warrior","glitch","#ff2a8d",3],
+["title_b4","无伤达人","無傷の達人","Flawless Master","glitch","#06b6d4",3],
+["title_d2","永恒之绊","永遠の絆","Eternal Bond","neon","#f43f5e",3],
+["title_c2","团队领袖","チームリーダー","Team Leader","flame","#f59e0b",3],
+["title_boss1","BOSS猎人","ボススレイヤー","Boss Slayer","flame","#ef4444",3],
+["title_set1","套装大师","套装マスター","Set Master","shimmer","#a855f7",3],
+["title_e1","锻造巨匠","鍛冶の巨匠","Forge Master","flame","#f59e0b",3],
+["title_s4","真相探求者","真実の探求者","Truth Seeker","glitch","#a855f7",4],
+["title_b3","传说配送员","伝説の配達人","Legendary Courier","void","#6366f1",4],
+["title_c3","全员集合","全員集合","Full Assembly","rainbow","#ec4899",4],
+["title_boss2","BOSS狩猎者","ボス狩猟者","Boss Hunter","void","#7c3aed",4],
+["title_p2","宠物大师","ペットマスター","Pet Master","rainbow","#10b981",4],
+["title_r2","恋爱达人","恋の達人","Love Expert","shimmer","#ec4899",4],
+["title_star1","星级晋升者","星の昇格者","Star Ascendant","neon","#fbbf24",4],
+["title_s5","世界救世主","世界の救世主","World Savior","divine","#ffd700",5],
+["title_s6","全次元霸者","全次元の覇者","All-Dimension Champion","chaos","#ff2a8d",5],
+["title_boss3","终焉破坏者","終焉の破壊者","Demise Destroyer","chaos","#ef4444",5],
+["title_r3","永恒之爱","永遠の愛","Eternal Love","divine","#ec4899",5],
+["title_d5","至高存在","至高の存在","Supreme Being","chaos","#a855f7",5],
+["title_newcomer","新手配送员","新米配達員","Rookie Courier","none","#9ca3af",1],
+["title_route_master","路线达人","ルートの達人","Route Master","shimmer","#06b6d4",3],
+["title_dimension_king","次元之王","次元の王","King of Dimensions","void","#7c3aed",4],
+["title_poker_champ","扑克冠军","ポーカーチャンピオン","Poker Champion","glow","#ffd700",2],
+["title_poker_sage","赌圣","賭聖","Gambling Sage","glow","#ffd700",3],
+["title_poker_dimensional","次元赌王","次元の賭王","Dimension Gambling King","neon","#f59e0b",4],
+["title_raid_hero","团队战英雄","レイドヒーロー","Raid Hero","flame","#ef4444",3],
+["title_enhance_sage","强化贤者","強化の賢者","Enhancement Sage","glow","#f59e0b",2],
+["title_bond_heart","羁绊之心","絆の心","Heart of Bonds","shimmer","#ec4899",2],
+["title_gacha_addict","配送狂人","配送狂","Delivery Fanatic","glow","#a855f7",2],
+["title_gacha_legend","配送传说","配送伝説","Delivery Legend","rainbow","#ec4899",4],
+["title_login_week","七日勤劳者","七日の勤労者","Seven-Day Worker","glow","#22c55e",1],
+["title_login_month","月度献身者","月間の献身者","Monthly Devotee","neon","#3b82f6",3],
+["title_time_traveler","时间旅人","時の旅人","Time Traveler","shimmer","#06b6d4",3],
+["title_time_master","时间支配者","時の支配者","Time Master","void","#6366f1",4],
+["title_boss_slayer","BOSS退治专家","ボス退治屋","Boss Exterminator","flame","#ef4444",3],
+["title_story_weaver","故事编织者","物語の紡ぎ手","Story Weaver","divine","#ffd700",4],
+["title_star_forger","星级锻造师","星の鍛造師","Star Forger","neon","#fbbf24",4],
+["title_credit_king","亿万富翁","億万長者","Multi-Millionaire","shimmer","#ffd700",3],
+["title_equip_master","装备大师","装備マスター","Equipment Master","glow","#f59e0b",2],
+["title_perfectionist","完美追求者","完璧追求者","Perfection Seeker","neon","#06b6d4",3],
+["title_charm_master","魅惑达人","魅了の達人","Charm Master","shimmer","#ec4899",2],
+["title_daily_hero","日常大师","デイリーマスター","Daily Hero","glow","#22c55e",3],
+["title_ultimate","究极配送员","究極の配達員","Ultimate Courier","chaos","#ff2a8d",5],
+["title_abyss_lantern","回廊探灯者","回廊の探灯者","Corridor Lamplighter","glow","#a855f7",3],
+["title_abyss_conqueror","深渊征服者","深淵の征服者","Abyss Conqueror","divine","#ffd700",5],
+["title_beast_hunter","巨兽猎手","巨獣狩り","Beast Hunter","flame","#ef4444",4],
+["title_memory_step","记忆探索者","記憶の探索者","Memory Explorer","glow","#38bdf8",2],
+["title_memory_keeper","记忆守望者","記憶の守望者","Memory Keeper","divine","#7dd3fc",5],
+["title_achv_seeker","成就探求者","実績の探求者","Achievement Seeker","glow","#cd7f32",2],
+["title_achv_hunter","成就猎人","実績ハンター","Achievement Hunter","shimmer","#c0c0c0",3],
+["title_achv_master","成就霸者","実績の覇者","Achievement Champion","neon","#ffd700",4],
+["title_achv_legend","成就殿堂","実績の殿堂","Achievement Hall","divine","#e5e4e2",5],
+["title_qp1","量子觉醒者","量子覚醒者","Quantum Awakened","glow","#22d3ee",2],
+["title_qp2","星路行者","星路の行者","Star Path Voyager","shimmer","#60a5fa",3],
+["title_qp3","次元霸主","次元の覇主","Dimension Overlord","neon","#a78bfa",4],
+["title_qp4","传说之巅","伝説の頂点","Legend's Summit","divine","#ffd700",5],
+["title_qp5","宇宙神话","宇宙神話","Cosmic Myth","chaos","#ff4500",5],
+["title_codex","次元博物学家","次元の博物学者","Dimensional Naturalist","shimmer","#34d399",4],
+["title_jeff_memorial","Jeff的纪念·星途之祝","Jeffの記念・星旅の祝い","Jeff Memorial: Star Voyage","starlight","#ffd166",3],
+["title_rank_top1","星穹独尊","星穹独尊","Firmament Sovereign","divine","#ffd700",5],
+["title_rank_top3","万象天引","万象天引","Cosmic Attraction","chaos","#a855f7",5],
+["title_ww_survivor","末日幸存者","終末を生き延びし者","Apocalypse Survivor","flame","#f43f5e",4],
+["title_appraise_30","欧皇附体","欧皇憑き","Luck Incarnate","rainbow","#fbbf24",3],
+["title_appraise_40","天命所归","天命の帰趨","Destined by Heaven","neon","#f59e0b",4],
+["title_appraise_50","宇宙之手","宇宙の手","Hand of the Cosmos","chaos","#7c3aed",5],
+["title_appraise_neg20","非酋本酋","非酋本酋","Chief of the Unlucky","none","#9ca3af",1],
+["title_no_level_req","牛了无级别","無等級・覇","Legendary: No Level Req","divine","#ffd700",5]
+];
+const TITLES_MAP = {};
+TITLE_ROWS.forEach(r => { TITLES_MAP[r[0]] = { id: r[0], z: r[1], j: r[2], e: r[3], fx: r[4], c: r[5], tier: r[6] }; });
+
 /* ═══════════════════════════════════════════════════════════════
    模块 2 · i18n（中/日/英，默认中文，全部文案走字典）
    ═══════════════════════════════════════════════════════════════ */
 const I18N = {
   zh: {
-    title: 'Naomi世界排行', sub: 'NAOMI QUANTUM CHRONICLE · WORLD RANKING',
+    title: 'Naomi量子战纪星路榜', sub: 'NAOMI QUANTUM CHRONICLE · STAR ROAD RANKING',
     live: 'OFFLINE LEAGUE · 赛季 ∞',
     liveOnline: 'ONLINE LEAGUE · 全球实时榜', netErr: '网络异常 · 稍后自动重试',
+    uploading: '量子同步中 · 正在上传上榜码…', uploadDone: '同步完成 · 已上榜',
     emptyTitleOnline: '虚位以待', emptySubOnline: '全服榜单暂无人上榜<br>粘贴上榜码，成为全服第一人',
     codeOkOnline: n => `✓ 上榜成功 · ${n} 已杀入全服榜`,
-    tabPower: '总榜', tabBoss: '世界BOSS', tabWw: '世界大战',
+    tabPower: '总榜', tabBoss: '世界BOSS', tabYday: '昨日榜', tabWw: '世界大战',
     codePh: '粘贴 NQCRANK- 上榜码…', codeBtn: '上榜',
     codeOk: n => `✓ 上榜成功 · ${n} 已杀入榜单`,
     codeErrFormat: '✕ 编码无效（格式错误）', codeErrSig: '✕ 编码无效（验签失败）', codeErrPayload: '✕ 编码无效（数据残缺）',
     codeErrStale: '✕ 上榜码已过期（超10分钟），请回游戏重新生成',
-    demo: '生成演示码（本地测试用）', demoOk: '演示码已填入，点击「上榜」',
     meEmpty: '尚未上榜<br>粘贴游戏内生成的上榜码，杀入世界排行',
-    meRank: '总榜名次', mePower: '战力', meFloor: '塔', meWins: '大战',
+    meRank: '总榜名次', mePower: '战力', meFloor: '塔', meKills: '击败',
     canClaim: '可领奖', claimed: '已领取',
     giftTitle: '每日礼包 · DAILY GIFT',
     giftTier: r => `当前总榜第 ${r} 名`,
     tierName: { RANK_D1: '第 1 名 · 王者档', RANK_D3: '前 3 名 · 传说档', RANK_D10: '前 10 名 · 精英档', RANK_N: '参榜 · 慰劳档' },
-    giftReward: t => `💎 ${t.gems} 钻 + 🪙 ${t.credits.toLocaleString('en-US')} 金币`,
-    giftClaimBtn: '生成奖励码', giftCopy: '一键复制', giftCopied: '已复制 · 回游戏内兑换',
-    giftHint: '回游戏内兑换 · 与本次上榜绑定',
+    giftReward: t => `${t.gems} 钻 + ${t.credits.toLocaleString('en-US')} 金币`,
+    giftClaimBtn: '生成奖励码',
+    giftCopyBig: '复制奖励码回游戏', giftCopySub: '回游戏自动识别领奖',
+    giftCopied: '已复制 · 回游戏自动识别领奖',
+    giftHint: '复制后回游戏自动识别兑换 · 与本次上榜绑定',
+    giftNote: '实时榜仅展示 · 排名奖励以昨日结算为准',
     giftDone: '✓ 本次上传的奖励已领取',
     giftReupload: '再次上传上榜码后可再领（游戏内重新生成即刷新）',
     giftNone: '上榜后即可按名次领取每日礼包<br>名次越高，奖励越豪华',
-    giftGenOk: '奖励码已生成',
-    emptyTitle: '先放你的码吧', emptySub: '游戏内生成 NQCRANK 上榜码<br>粘贴到顶部输入框即可杀入榜单',
-    boardFoot: (n, k) => `共 ${n} 名选手 · 按${k}排序 · 每日种子榜单`,
-    sortPower: '量子综合战力', sortBoss: '深渊塔层数', sortWw: '世界大战胜场',
-    lbPower: 'POWER', lbFloor: 'ABYSS', lbWins: 'WINS',
-    metaPower: (r, f, w) => `战力 <b>${r}</b> · 塔 <b>${f}F</b> · 大战 <b>${w}胜</b>`,
+    giftGenOk: '奖励码已生成 · 一键复制回游戏',
+    boardFoot: (n, k) => `共 ${n} 名选手 · 按${k}排序`,
+    liveNoReward: '实时榜仅展示 · 奖励以昨日结算为准',
+    sortPower: '量子综合战力', sortBoss: '深渊层数',
+    lbPower: 'POWER', lbFloor: '深渊层数', lbKills: '击败数',
+    metaPower: (f, k) => `塔 <b>${f}F</b> · 击败 <b>${k}</b>`,
+    metaPowerNoWar: f => `塔 <b>${f}F</b>`,
     metaOther: (p, r) => `战力 <b>${p}</b> · 名次 <b>${r}</b>`,
     dMega: 'MEGA装备', dEnh: '最高强化', dCredits: '金币', dGems: '钻石',
     dRank: '榜内名次', dPort: '立绘解锁', dFloor: '塔层数', dCxN: '菜小鸟',
-    cxnYes: '已击破', cxnNo: '未击破', unitJian: '件', unitF: 'F', unitWin: '胜',
+    cxnYes: '已击破', cxnNo: '未击破', unitJian: '件', unitF: 'F',
     noParty: '无角色数据',
-    wwTitle: '世界大战 · 昨日战报', wwChamp: n => `冠军 ${n}`,
-    wwYou: (r, t) => `你的名次: 第 ${r} / ${t} 名`, wwYouOut: '未上榜 · 上榜后真人参战',
-    wwReward: '夺冠奖励码（解锁称号「末日幸存者」）',
-    wwBefore: '昨日战场每日 12:00 结算，稍后再来',
-    wwNeed: '上榜并夺冠后，此处发放专属奖励码',
     uploadedAt: '上传于',
+    /* ── 昨日榜 ── */
+    ydayTitle: '昨日榜 · 结算封存', ydaySealed: '数据已封存 · 今日上传不影响昨日榜',
+    ydayEmpty: '昨日榜尚未生成', ydayEmptySub: '榜单每日 0 点结算封存<br>明日 0 点后回来看看',
+    ydayReward: '昨日结算奖励',
+    ydayMe: (r, s) => `昨日第 ${r} 名 · ${s}`,
+    ydayNotMe: '昨日前 3 名可领奖<br>今日冲榜，明日 0 点结算领奖',
+    ydayCopyBig: '复制奖励码回游戏', ydayCopySub: '回游戏自动识别领奖',
+    ydayCopied: '已复制 · 回游戏自动识别领奖',
+    ydayCodeHint: '回游戏自动识别领奖 · 建议先领昨日奖，再上传今日上榜码',
+    /* ── 世界大战 ── */
+    wwTitle: '世界大战 · 昨日战报',
+    wwChamp: n => `冠军 ${n}`,
+    wwKills: k => `击败 ${k} 人`, wwTotal: n => `${n} 人参赛`, wwPlayers: '参赛人数',
+    wwYou: (r, t) => `你的名次: 第 ${r} / ${t} 名`, wwYouOut: '未参赛 · 上榜后自动参战', wwYouRank: '大战名次',
+    wwChampionTag: '存活到最后',
+    wwReward: '夺冠奖励码（解锁称号「末日幸存者」）',
+    wwCopyBig: '复制奖励码回游戏', wwCopySub: '回游戏自动识别领奖',
+    wwCopied: '已复制 · 回游戏自动识别领奖',
+    wwNeed: '上榜并夺冠后，此处发放专属奖励码',
+    wwNeed5: (n, t) => `参赛 ${n}/${t} · 满 ${t} 人明日开战`,
+    wwNeed5Sub: '参赛 = 全部上榜玩家 · 每日 0 点结算快照<br>满 5 人后，次日 0 点自动生成完整战报',
+    wwPending: '昨日战报结算中 · 稍后再来',
+    wwRecord: '对战记录', wwBracket: '完整赛程', wwBracketSub: '点击单场可展开逐回合记录',
+    wwBye: '轮空晋级', wwTiebreak: '总战力决胜局',
+    wwVs: (a, b) => `${a} <i>VS</i> ${b}`,
+    wwKo: (a, b) => `${a} 击破 ${b}`, wwKoBy: (a, b) => `${a} 被 ${b} 击破`,
+    wwChar: (n, s, l) => `${n}(星${s} Lv${l})`,
+    wwEmptySlot: '空位',
+    tagAdv: '克制', tagDis: '逆克', tagRes: '共鸣', tagBye: '空位',
+    wwRound: n => `R${n}`, wwFinal: '决赛',
+    wwElim: r => `第 ${r} 轮淘汰`,
+    wwPreview: n => n >= 5
+      ? `今日 <b>${n}</b> 人已报名 · 明日 0 点结算开战`
+      : `今日 <b>${n}</b>/5 人 · 满 5 人明日开战`,
   },
   ja: {
-    title: 'ナオミ世界ランキング', sub: 'NAOMI QUANTUM CHRONICLE · WORLD RANKING',
+    title: 'ナオミ量子戦紀スターロード榜', sub: 'NAOMI QUANTUM CHRONICLE · STAR ROAD RANKING',
     live: 'OFFLINE LEAGUE · シーズン ∞',
     liveOnline: 'ONLINE LEAGUE · グローバル实时榜', netErr: '通信エラー · 後ほど再試行',
+    uploading: '量子同期中 · コード送信中…', uploadDone: '同期完了 · ランクイン済',
     emptyTitleOnline: '虚位以待', emptySubOnline: '全サーバーの榜はまだ空です<br>コードを貼って最初の覇者になろう',
     codeOkOnline: n => `✓ ランクイン · ${n} が全服榜に参戦`,
-    tabPower: '総合榜', tabBoss: 'ワールドボス', tabWw: '世界大戦',
+    tabPower: '総合榜', tabBoss: 'ワールドボス', tabYday: '昨日の榜', tabWw: '世界大戦',
     codePh: 'NQCRANK- コードを貼り付け…', codeBtn: '登録',
     codeOk: n => `✓ ランクイン · ${n} が参戦`,
     codeErrFormat: '✕ 無効なコード（形式エラー）', codeErrSig: '✕ 無効なコード（署名エラー）', codeErrPayload: '✕ 無効なコード（データ不足）',
     codeErrStale: '✕ コード期限切れ（10分経過）・ゲーム内で再生成を',
-    demo: 'デモコード生成（テスト用）', demoOk: 'デモコード入力済み・「登録」をタップ',
     meEmpty: '未ランクイン<br>ゲーム内のコードを貼って参戦しよう',
-    meRank: '総合順位', mePower: '戦力', meFloor: '塔', meWins: '大戦',
+    meRank: '総合順位', mePower: '戦力', meFloor: '塔', meKills: '撃破',
     canClaim: '受取可', claimed: '受取済',
     giftTitle: 'デイリーギフト · DAILY GIFT',
     giftTier: r => `現在の総合順位 ${r} 位`,
     tierName: { RANK_D1: '1位 · 王者', RANK_D3: '3位以内 · 伝説', RANK_D10: '10位以内 · エリート', RANK_N: '参加 · 慰労' },
-    giftReward: t => `💎 ${t.gems} ジェム + 🪙 ${t.credits.toLocaleString('en-US')} ゴールド`,
-    giftClaimBtn: '報酬コード生成', giftCopy: 'コピー', giftCopied: 'コピー済 · ゲーム内で交換',
-    giftHint: 'ゲーム内で交換 · 今回の登録と紐付け',
+    giftReward: t => `${t.gems} ジェム + ${t.credits.toLocaleString('en-US')} ゴールド`,
+    giftClaimBtn: '報酬コード生成',
+    giftCopyBig: 'コードをコピーしてゲームへ', giftCopySub: 'ゲーム内で自動認識',
+    giftCopied: 'コピー済 · ゲームで自動認識',
+    giftHint: 'コピー後ゲームで自動認識 · 今回の登録と紐付け',
+    giftNote: 'リアルタイム榜は展示のみ · 報酬は昨日の確定分に準拠',
     giftDone: '✓ 今回のアップロード分は受取済み',
     giftReupload: '再アップロードで再度受取可能（ゲーム内で再生成）',
     giftNone: 'ランクインすると順位に応じたギフトが貰える<br>上位ほど豪華に',
-    giftGenOk: '報酬コードを生成しました',
-    emptyTitle: 'まずコードを貼ろう', emptySub: 'ゲーム内で NQCRANK コードを生成<br>上の入力欄に貼るだけで参戦',
-    boardFoot: (n, k) => `${n} 名参戦 · ${k}順 · デイリーシード榜`,
-    sortPower: '量子総合戦力', sortBoss: '深淵塔の階数', sortWw: '世界大戦の勝数',
-    lbPower: 'POWER', lbFloor: 'ABYSS', lbWins: 'WINS',
-    metaPower: (r, f, w) => `戦力 <b>${r}</b> · 塔 <b>${f}F</b> · 大戦 <b>${w}勝</b>`,
+    giftGenOk: '報酬コードを生成 · コピーしてゲームへ',
+    boardFoot: (n, k) => `${n} 名参戦 · ${k}順`,
+    liveNoReward: 'リアルタイム榜は展示のみ · 報酬は昨日確定分に準拠',
+    sortPower: '量子総合戦力', sortBoss: '深淵の階数',
+    lbPower: 'POWER', lbFloor: '深淵階数', lbKills: '撃破数',
+    metaPower: (f, k) => `塔 <b>${f}F</b> · 撃破 <b>${k}</b>`,
+    metaPowerNoWar: f => `塔 <b>${f}F</b>`,
     metaOther: (p, r) => `戦力 <b>${p}</b> · 順位 <b>${r}</b>`,
     dMega: 'MEGA装備', dEnh: '最大強化', dCredits: 'ゴールド', dGems: 'ジェム',
     dRank: '榜内順位', dPort: '立絵解放', dFloor: '塔の階数', dCxN: '菜小鳥',
-    cxnYes: '撃破済', cxnNo: '未撃破', unitJian: '個', unitF: 'F', unitWin: '勝',
+    cxnYes: '撃破済', cxnNo: '未撃破', unitJian: '個', unitF: 'F',
     noParty: 'キャラデータなし',
-    wwTitle: '世界大戦 · 昨日の戦報', wwChamp: n => `覇者 ${n}`,
-    wwYou: (r, t) => `あなたの順位: ${r} / ${t} 位`, wwYouOut: '未参戦 · 登録後に参戦',
-    wwReward: '優勝報酬コード（称号「末日の生存者」解放）',
-    wwBefore: '昨日分は毎日 12:00 に確定、しばらくお待ちを',
-    wwNeed: '参戦して優勝すると専用コードを配布',
     uploadedAt: 'アップロード',
+    ydayTitle: '昨日の榜 · 確定済', ydaySealed: 'データ確定済 · 今日の登録は昨日の榜に影響しません',
+    ydayEmpty: '昨日の榜はまだありません', ydayEmptySub: '榜は毎日 0 時に確定します<br>明日 0 時過ぎにまた来てね',
+    ydayReward: '昨日確定報酬',
+    ydayMe: (r, s) => `昨日 ${r} 位 · ${s}`,
+    ydayNotMe: '昨日のトップ3が受取可能<br>今日頑張って、明日 0 時に確定',
+    ydayCopyBig: 'コードをコピーしてゲームへ', ydayCopySub: 'ゲーム内で自動認識',
+    ydayCopied: 'コピー済 · ゲームで自動認識',
+    ydayCodeHint: 'ゲーム内で自動認識 · 先に昨日分を受け取ってから今日のコードを登録してね',
+    wwTitle: '世界大戦 · 昨日の戦報',
+    wwChamp: n => `覇者 ${n}`,
+    wwKills: k => `${k} 人撃破`, wwTotal: n => `${n} 人参加`, wwPlayers: '参加者',
+    wwYou: (r, t) => `あなたの順位: ${r} / ${t} 位`, wwYouOut: '未参加 · 登録後に自動参戦', wwYouRank: '大戦順位',
+    wwChampionTag: '最後まで生存',
+    wwReward: '優勝報酬コード（称号「末日の生存者」解放）',
+    wwCopyBig: 'コードをコピーしてゲームへ', wwCopySub: 'ゲーム内で自動認識',
+    wwCopied: 'コピー済 · ゲームで自動認識',
+    wwNeed: '参戦して優勝すると専用コードを配布',
+    wwNeed5: (n, t) => `参加 ${n}/${t} · ${t} 人で明日開戦`,
+    wwNeed5Sub: '参加 = ランクイン全員 · 毎日 0 時に確定<br>5 人集まると翌日 0 時に戦報を自動生成',
+    wwPending: '昨日分は集計中 · しばらくお待ちを',
+    wwRecord: '対戦記録', wwBracket: '全試合', wwBracketSub: 'タップでラウンド詳細を展開',
+    wwBye: '不戦勝', wwTiebreak: '総戦力決勝局',
+    wwVs: (a, b) => `${a} <i>VS</i> ${b}`,
+    wwKo: (a, b) => `${a} が ${b} を撃破`, wwKoBy: (a, b) => `${a} が ${b} に撃破された`,
+    wwChar: (n, s, l) => `${n}(星${s} Lv${l})`,
+    wwEmptySlot: '空き',
+    tagAdv: '有利', tagDis: '不利', tagRes: '共鳴', tagBye: '空き',
+    wwRound: n => `R${n}`, wwFinal: '決勝',
+    wwElim: r => `R${r} で敗退`,
+    wwPreview: n => n >= 5
+      ? `今日 <b>${n}</b> 人がエントリー · 明日 0 時に開戦`
+      : `今日 <b>${n}</b>/5 人 · 5 人で明日開戦`,
   },
   en: {
-    title: 'Naomi World Ranking', sub: 'NAOMI QUANTUM CHRONICLE · WORLD RANKING',
+    title: 'Naomi Quantum Star Road Ranking', sub: 'NAOMI QUANTUM CHRONICLE · STAR ROAD RANKING',
     live: 'OFFLINE LEAGUE · SEASON ∞',
     liveOnline: 'ONLINE LEAGUE · GLOBAL LIVE', netErr: 'Network error · will retry',
+    uploading: 'Quantum syncing · uploading code…', uploadDone: 'Synced · ranked',
     emptyTitleOnline: 'Awaiting Challengers', emptySubOnline: 'The global board is empty<br>Paste your code and become the first legend',
     codeOkOnline: n => `✓ Ranked! ${n} enters the global board`,
-    tabPower: 'Overall', tabBoss: 'World Boss', tabWw: 'World War',
+    tabPower: 'Overall', tabBoss: 'World Boss', tabYday: 'Yesterday', tabWw: 'World War',
     codePh: 'Paste NQCRANK- code…', codeBtn: 'ENTER',
     codeOk: n => `✓ Ranked! ${n} enters the board`,
     codeErrFormat: '✕ Invalid code (format)', codeErrSig: '✕ Invalid code (signature)', codeErrPayload: '✕ Invalid code (payload)',
     codeErrStale: '✕ Code expired (>10 min) · regenerate in game',
-    demo: 'Generate demo code (local test)', demoOk: 'Demo code filled · tap ENTER',
     meEmpty: 'Not ranked yet<br>Paste your in-game code to enter the world ranking',
-    meRank: 'Overall Rank', mePower: 'Power', meFloor: 'Tower', meWins: 'War',
+    meRank: 'Overall Rank', mePower: 'Power', meFloor: 'Tower', meKills: 'KOs',
     canClaim: 'CLAIM', claimed: 'CLAIMED',
     giftTitle: 'Daily Gift · DAILY GIFT',
     giftTier: r => `Current overall rank #${r}`,
     tierName: { RANK_D1: '#1 · King Tier', RANK_D3: 'Top 3 · Legend', RANK_D10: 'Top 10 · Elite', RANK_N: 'Entry · Consolation' },
-    giftReward: t => `💎 ${t.gems} Gems + 🪙 ${t.credits.toLocaleString('en-US')} Credits`,
-    giftClaimBtn: 'Generate Code', giftCopy: 'Copy', giftCopied: 'Copied · redeem in game',
-    giftHint: 'Redeem in game · bound to this upload',
+    giftReward: t => `${t.gems} Gems + ${t.credits.toLocaleString('en-US')} Credits`,
+    giftClaimBtn: 'Generate Code',
+    giftCopyBig: 'Copy Code Back to Game', giftCopySub: 'Auto-detected in game',
+    giftCopied: 'Copied · auto-detected in game',
+    giftHint: 'Copy & return to game · auto-detected · bound to this upload',
+    giftNote: 'Live board is display-only · rewards settle by yesterday\'s final board',
     giftDone: '✓ Reward for this upload claimed',
     giftReupload: 'Re-upload your rank code to claim again (regenerate in game)',
     giftNone: 'Enter the board to claim a daily gift by rank<br>Higher rank, better loot',
-    giftGenOk: 'Reward code generated',
-    emptyTitle: 'Drop your code first', emptySub: 'Generate an NQCRANK code in game<br>and paste it above to enter the board',
-    boardFoot: (n, k) => `${n} contenders · sorted by ${k} · daily seed board`,
-    sortPower: 'quantum power', sortBoss: 'abyss floor', sortWw: 'war wins',
-    lbPower: 'POWER', lbFloor: 'ABYSS', lbWins: 'WINS',
-    metaPower: (r, f, w) => `PWR <b>${r}</b> · Tower <b>${f}F</b> · War <b>${w}W</b>`,
+    giftGenOk: 'Reward code generated · copy back to game',
+    boardFoot: (n, k) => `${n} contenders · sorted by ${k}`,
+    liveNoReward: 'Live board is display-only · rewards settle by yesterday\'s board',
+    sortPower: 'quantum power', sortBoss: 'abyss floor',
+    lbPower: 'POWER', lbFloor: 'ABYSS FLOOR', lbKills: 'KOs',
+    metaPower: (f, k) => `Tower <b>${f}F</b> · KOs <b>${k}</b>`,
+    metaPowerNoWar: f => `Tower <b>${f}F</b>`,
     metaOther: (p, r) => `PWR <b>${p}</b> · Rank <b>${r}</b>`,
     dMega: 'MEGA Gear', dEnh: 'Max Enhance', dCredits: 'Credits', dGems: 'Gems',
     dRank: 'Board Rank', dPort: 'Portraits', dFloor: 'Tower', dCxN: 'CaiXiaoNiao',
-    cxnYes: 'Defeated', cxnNo: 'Alive', unitJian: '', unitF: 'F', unitWin: 'W',
+    cxnYes: 'Defeated', cxnNo: 'Alive', unitJian: '', unitF: 'F',
     noParty: 'No party data',
-    wwTitle: 'World War · Yesterday\'s Report', wwChamp: n => `Champion ${n}`,
-    wwYou: (r, t) => `Your rank: #${r} / ${t}`, wwYouOut: 'Not entered · rank up to join',
-    wwReward: 'Champion code (unlocks title "Last Survivor")',
-    wwBefore: 'Yesterday\'s war settles at 12:00 daily',
-    wwNeed: 'Enter and win to receive an exclusive code',
     uploadedAt: 'Uploaded',
+    ydayTitle: 'Yesterday · Settled', ydaySealed: 'Data sealed · today\'s uploads do not affect yesterday',
+    ydayEmpty: 'Yesterday\'s board not generated yet', ydayEmptySub: 'The board settles at 00:00 daily<br>Come back after midnight',
+    ydayReward: 'Yesterday\'s Reward',
+    ydayMe: (r, s) => `Yesterday #${r} · ${s}`,
+    ydayNotMe: 'Yesterday\'s top 3 can claim<br>Climb today, claim after midnight',
+    ydayCopyBig: 'Copy Code Back to Game', ydayCopySub: 'Auto-detected in game',
+    ydayCopied: 'Copied · auto-detected in game',
+    ydayCodeHint: 'Auto-detected in game · claim yesterday\'s reward before uploading today',
+    wwTitle: 'World War · Yesterday\'s Report',
+    wwChamp: n => `Champion ${n}`,
+    wwKills: k => `${k} KOs`, wwTotal: n => `${n} contenders`, wwPlayers: 'PLAYERS',
+    wwYou: (r, t) => `Your rank: #${r} / ${t}`, wwYouOut: 'Not entered · rank up to join', wwYouRank: 'WAR RANK',
+    wwChampionTag: 'Last one standing',
+    wwReward: 'Champion code (unlocks title "Last Survivor")',
+    wwCopyBig: 'Copy Code Back to Game', wwCopySub: 'Auto-detected in game',
+    wwCopied: 'Copied · auto-detected in game',
+    wwNeed: 'Enter and win to receive an exclusive code',
+    wwNeed5: (n, t) => `${n}/${t} entered · war starts tomorrow at ${t}`,
+    wwNeed5Sub: 'Entry = every ranked player · settles 00:00 daily<br>With 5+ players, a full report generates next midnight',
+    wwPending: 'Yesterday\'s report is settling · check back soon',
+    wwRecord: 'Battle Log', wwBracket: 'Full Bracket', wwBracketSub: 'Tap a match to expand rounds',
+    wwBye: 'Bye · advances', wwTiebreak: 'Total-power tiebreak',
+    wwVs: (a, b) => `${a} <i>VS</i> ${b}`,
+    wwKo: (a, b) => `${a} KO'd ${b}`, wwKoBy: (a, b) => `${a} was KO'd by ${b}`,
+    wwChar: (n, s, l) => `${n}(★${s} Lv${l})`,
+    wwEmptySlot: 'Empty',
+    tagAdv: 'ADV', tagDis: 'WEAK', tagRes: 'RESONANCE', tagBye: 'EMPTY',
+    wwRound: n => `R${n}`, wwFinal: 'Final',
+    wwElim: r => `Eliminated in R${r}`,
+    wwPreview: n => n >= 5
+      ? `<b>${n}</b> entered today · war settles at midnight`
+      : `<b>${n}</b>/5 today · war starts tomorrow at 5`,
   },
 };
 const LS_LANG = 'nqrank_lang';
@@ -582,7 +1049,7 @@ let LANG = (() => { try { const l = localStorage.getItem(LS_LANG); return I18N[l
 const t = k => I18N[LANG][k];
 
 /* ═══════════════════════════════════════════════════════════════
-   模块 3 · 种子随机（每日稳定）
+   模块 3 · 种子随机（mulberry32 + FNV-1a；与 Worker 同实现）
    ═══════════════════════════════════════════════════════════════ */
 function hashStr(s) {
   let h = 0x811c9dc5;
@@ -597,66 +1064,28 @@ function mulberry32(a) {
     return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
   };
 }
-const ri = (rng, min, max) => min + Math.floor(rng() * (max - min + 1));
 
 /* ═══════════════════════════════════════════════════════════════
-   模块 4 · Mock 50 人（中/日/英 ≈ 4:3:3，每日种子稳定）
+   模块 4 · UTC+8 结算日键（每日 0 点 UTC+8 封存昨日榜）
    ═══════════════════════════════════════════════════════════════ */
-const NAMES_ZH = ['夜枭速递','量子游侠','星尘配送员','苍穹老司机','虚空跑单人','霓虹镖师','幻影急便','磁暴车队长','深空信使','零点押运','数据海拾荒者','红移补给线','白夜快递员','暗物质镖客','重力井摆渡人','轨道掷弹手','极光押送','黑洞外卖员','星门看守','折跃点蹲哥']; // 20
-const NAMES_JA = ['瞬きの星','月面宅配便','量子貓又','零号倉庫番','終末配達記録','桜吹雪急便','電脳行商人','銀河運び屋','星屑配達員','深夜便パイロット','光子郵便屋','軌道の旅人','電光配達娘','虚空航路士','流星トラッカー']; // 15
-const NAMES_EN = ['Kuro_Neko','OverDrive_Rin','Nova_Runner','Ghost_Protocol','Warp_Love','Blaze_Heart','NeonVoyager','CyberDusk','QuantumFox','Starlight_07','ZeroG_Rider','PulseHunter','AstroCourier','NightOwl_X','ChromeSakura']; // 15
-const CHAR_POOL = [ // 与 art_v2/characters/*_avatar.webp 对应
-  { id:'naomi', name:'ナオミ' }, { id:'rin', name:'リン' }, { id:'sora', name:'ソラ' },
-  { id:'akira', name:'アキラ' }, { id:'yuki', name:'ユキ' }, { id:'hikari', name:'ヒカリ' },
-  { id:'ren', name:'レン' }, { id:'kaede', name:'カエデ' }, { id:'mei', name:'メイ' },
-  { id:'echo', name:'エコー' }, { id:'annie', name:'アニー' }, { id:'gaia', name:'ガイア' },
-  { id:'jin', name:'ジン' }, { id:'jie', name:'ジェイ' }, { id:'kuro', name:'クロ' },
-  { id:'tsuki', name:'ツキ' }, { id:'jony', name:'ジョニー' }, { id:'raiden', name:'ライデン' },
-  { id:'shaan', name:'シャン' }, { id:'jeff', name:'ジェフ' },
-];
-
-/** 当日 mock：种子=日期 → 全天任何设备刷新都是同一批；名字 中20/日15/英15 种子洗牌混排 */
-function genMockPlayers(dateStr) {
-  const rng = mulberry32(hashStr('nqc_rank_mock_' + dateStr));
-  // 语言标签池 4:3:3 → 洗牌，再按标签顺序从各池取名
-  const tags = [...Array(20).fill('zh'), ...Array(15).fill('ja'), ...Array(15).fill('en')];
-  for (let i = tags.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [tags[i], tags[j]] = [tags[j], tags[i]]; }
-  const pools = { zh: NAMES_ZH.slice(), ja: NAMES_JA.slice(), en: NAMES_EN.slice() };
-  const list = [];
-  for (let i = 0; i < 50; i++) {
-    const tt = i / 49; // 0=榜首 … 1=榜尾
-    const base = 268000 * Math.pow(600 / 268000, tt);
-    const power = Math.max(100, Math.round(base * (0.88 + rng() * 0.24)));
-    const name = pools[tags[i]].splice(Math.floor(rng() * pools[tags[i]].length), 1)[0];
-    const pool = CHAR_POOL.slice();
-    const party = [];
-    for (let c = 0; c < 3; c++) {
-      const ch = pool.splice(Math.floor(rng() * pool.length), 1)[0];
-      party.push({ charId: ch.id, name: ch.name, level: ri(rng, 10, 80), stars: ri(rng, 2, 6),
-        power: Math.max(120, Math.round(power * (0.15 + rng() * 0.25))) });
-    }
-    list.push({
-      slotId: 'MOCK-' + dateStr + '-' + i, mock: true, name, power,
-      party,
-      megaCount: Math.round(Math.min(12, power / 22000) * (0.5 + rng())),
-      maxEnhance: Math.min(15, Math.round(power / 18000) + ri(rng, 0, 2)),
-      credits: ri(rng, 20000, 9000000), gems: ri(rng, 100, 30000),
-      rank: 0, portraitCount: Math.round(Math.min(60, power / 4500) * (0.5 + rng())),
-      abyssFloor: Math.max(1, Math.round(140 * Math.pow(power / 268000, 0.7) * (0.8 + rng() * 0.4))),
-      caixiaoniao: power > 40000 ? (rng() < 0.7 ? 1 : 0) : (rng() < 0.2 ? 1 : 0),
-      worldWarWins: ri(rng, 0, 2) + (i < 10 ? ri(rng, 1, 9) : 0),
-      ts: 0,
-    });
-  }
-  return list;
+function key8FromMs(ms) {
+  const d = new Date(ms + 8 * 3600 * 1000);
+  return d.getUTCFullYear() + String(d.getUTCMonth() + 1).padStart(2, '0') + String(d.getUTCDate()).padStart(2, '0');
+}
+function todayKey8() { return key8FromMs(Date.now()); }
+function yesterdayKey8() { return key8FromMs(Date.now() - 86400000); }
+/** 结算锚点：dateKey 当日 23:59（UTC+8）毫秒（奖励码 ts 锚，保证昨日数据不变） */
+function settleAnchorMs(dateKey) {
+  const y = +dateKey.slice(0, 4), m = +dateKey.slice(4, 6), d = +dateKey.slice(6, 8);
+  return Date.UTC(y, m - 1, d, 16, 0, 0) - 60000; // UTC+8 次日 0 点 = UTC 16:00，再退 1 分钟
 }
 
 /* ═══════════════════════════════════════════════════════════════
    模块 5 · 存储（localStorage）
    ═══════════════════════════════════════════════════════════════ */
-const LS_ENTRIES = 'nqrank_entries_v2'; // { slotId: entry }
+const LS_ENTRIES = 'nqrank_entries_v2'; // { slotId: entry } 本机上传的存档（"我"标识 + 领奖 ts 锚点）
 const LS_CLAIMED = 'nqrank_claimed_v2'; // { slotId: [{ts, code}] } — 领奖新鲜度登记
-const LS_WWCODE  = 'nqrank_ww_code_v2'; // { date: code }
+const LS_SNAP    = 'nqrank_snap_v3';    // { date, entries } — 本机昨日榜快照（Worker 快照的降级回退）
 
 function loadEntries() {
   try { const o = JSON.parse(localStorage.getItem(LS_ENTRIES) || '{}'); return (o && typeof o === 'object') ? o : {}; }
@@ -668,17 +1097,26 @@ function loadClaimed() {
   catch { return {}; }
 }
 function saveClaimed(o) { try { localStorage.setItem(LS_CLAIMED, JSON.stringify(o)); } catch {} }
-function todayStr(d = new Date()) {
-  return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+function loadSnap() {
+  try { const o = JSON.parse(localStorage.getItem(LS_SNAP) || 'null'); return (o && Array.isArray(o.entries)) ? o : null; }
+  catch { return null; }
 }
-function yesterdayStr() { const d = new Date(); d.setDate(d.getDate() - 1); return todayStr(d); }
+/** 本机快照：每日首次拿到榜单数据时冻结（仅作 Worker 快照不可用时的降级回退） */
+function maybeSnapLocal(entries) {
+  try {
+    const key = todayKey8();
+    const cur = loadSnap();
+    if (!cur || cur.date !== key) localStorage.setItem(LS_SNAP, JSON.stringify({ date: key, entries }));
+  } catch {}
+}
 
 /* ═══════════════════════════════════════════════════════════════
    模块 5.5 · 线上模式 API（API_BASE 非空时启用；失败静默回退本地）
    ═══════════════════════════════════════════════════════════════ */
 let REAL = [];          // 全服真实榜单（GET /rank）
 let REAL_OK = false;    // 后端是否连通
-let WAR = null;         // 世界大战服务器战报（GET /war）
+let WAR = null;         // 世界大战昨日战报（GET /war，v3 格式）
+let YDAY = null;        // 昨日榜快照（GET /yesterday）
 
 async function apiGet(path) {
   const r = await fetch(API_BASE + path, { cache: 'no-store' });
@@ -699,11 +1137,16 @@ async function refreshReal() {
     const j = await apiGet('/rank');
     REAL = Array.isArray(j.entries) ? j.entries : [];
     REAL_OK = true;
+    maybeSnapLocal(REAL); // 降级回退快照（Worker /yesterday 不可用时启用）
   } catch { REAL_OK = false; toast(t('netErr')); }
 }
 async function refreshWar() {
   if (!ONLINE) return;
-  try { WAR = await apiGet('/war'); } catch { WAR = null; }
+  try { const j = await apiGet('/war'); WAR = (j && j.v === 3) ? j : null; } catch { WAR = null; }
+}
+async function refreshYday() {
+  if (!ONLINE) return;
+  try { const j = await apiGet('/yesterday'); YDAY = (j && Array.isArray(j.entries)) ? j : null; } catch { YDAY = null; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -716,11 +1159,6 @@ function b64urlDecode(s) {
   const bin = atob(b64 + pad);
   const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
   return new TextDecoder('utf-8').decode(bytes);
-}
-function b64urlEncode(str) {
-  const bytes = new TextEncoder().encode(str);
-  let bin = ''; bytes.forEach(b => bin += String.fromCharCode(b));
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 function verifyRankCode(raw) {
   const code = String(raw || '').trim().replace(/\s+/g, '');
@@ -746,187 +1184,568 @@ function verifyRankCode(raw) {
   data.abyssFloor = +data.abyssFloor || 0;
   data.caixiaoniao = data.caixiaoniao ? 1 : 0;
   data.worldWarWins = +data.worldWarWins || 0;
+  // 佩戴称号（可选）：字符串 id 或 { id/name/nameZh/nameEn/effect/effectColor/tier }，原样透传
+  if (data.title != null && typeof data.title !== 'string' && typeof data.title !== 'object') delete data.title;
   return { ok: true, data };
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   模块 7 · 渲染
+   模块 6.5 · 称号解析与渲染（payload.title → TITLES_MAP；特效与游戏内一致）
+   ═══════════════════════════════════════════════════════════════ */
+const TITLE_FX_SET = /^(glow|glitch|shimmer|neon|flame|rainbow|void|divine|chaos|starlight|none)$/;
+/** 解析称号：字符串 id / 对象 / 未知字符串（按文本渲染）；无 → null */
+function resolveTitle(raw) {
+  if (raw == null || raw === '') return null;
+  if (typeof raw === 'string') {
+    const hit = TITLES_MAP[raw];
+    if (hit) return hit;
+    return { id: '', z: raw, j: raw, e: raw, fx: 'glow', c: '#00f0ff', tier: 1 };
+  }
+  if (typeof raw === 'object') {
+    const base = (typeof raw.id === 'string' && TITLES_MAP[raw.id]) || null;
+    const z = raw.nameZh || raw.z || (base && base.z) || (typeof raw.name === 'string' ? '' : '') || '';
+    const j = raw.name || raw.j || (base && base.j) || z;
+    const e = raw.nameEn || raw.e || (base && base.e) || j;
+    const zz = z || j || e;
+    if (!zz) return null;
+    return {
+      id: raw.id || (base && base.id) || '',
+      z: zz, j: j || zz, e: e || zz,
+      fx: raw.effect || raw.fx || (base && base.fx) || 'glow',
+      c: raw.effectColor || raw.c || (base && base.c) || '#00f0ff',
+      tier: +(raw.tier ?? (base && base.tier) ?? 1) || 1,
+    };
+  }
+  return null;
+}
+function titleNameOf(tt) { return LANG === 'zh' ? (tt.z || tt.j || tt.e) : LANG === 'ja' ? (tt.j || tt.z || tt.e) : (tt.e || tt.z || tt.j); }
+/** 特效等级（与游戏 getTitleFxLevel 同口径）：2=高级流光贯穿，1=星辉，0=常规 */
+function titleFxLevel(tt) {
+  if (!tt) return 0;
+  if (tt.fx === 'starlight') return 1;
+  if ((tt.tier ?? 0) >= 4 || tt.fx === 'divine' || tt.fx === 'chaos') return 2;
+  return 0;
+}
+function streamFxHtml(color, soft) {
+  const band = rev => `<i class="title-stream-band${rev ? ' title-stream-band-rev' : ''}" style="background:linear-gradient(100deg,transparent 0%,${color}14 28%,${color}59 46%,#ffffffd9 50%,${color}59 54%,${color}14 72%,transparent 100%);animation-duration:${rev ? (soft ? '4.6s' : '3.9s') : (soft ? '4s' : '3.4s')}"></i>`;
+  let sparks = '';
+  const n = soft ? 4 : 6;
+  for (let i = 0; i < n; i++) {
+    sparks += `<b class="title-stream-spark" style="left:${10 + (i * 31) % 80}%;top:${18 + (i * 47) % 64}%;background:${i % 3 === 0 ? '#ffffff' : color};box-shadow:0 0 5px ${color},0 0 9px ${color}80;animation-duration:${1.8 + (i % 3) * 0.5}s;animation-delay:${-(i * 0.43)}s"></b>`;
+  }
+  return `<span class="title-stream-fx" aria-hidden="true">${band(false)}${band(true)}${sparks}</span>`;
+}
+function starParticlesHtml() {
+  let s = '';
+  for (let i = 0; i < 8; i++) {
+    s += `<b class="title-star-particle" style="left:${8 + (i * 29) % 84}%;top:${12 + (i * 41) % 72}%;animation-duration:${1.5 + (i % 4) * 0.4}s;animation-delay:${-(i * 0.31)}s"></b>`;
+  }
+  return s;
+}
+/**
+ * 称号 HTML：small=卡片内小字（纯文字特效）；big=详情大区（tier≥4/divine/chaos 加流光贯穿，starlight 加星辉粒子）
+ */
+function titleHtml(raw, big) {
+  const tt = resolveTitle(raw);
+  if (!tt) return '';
+  const nm = esc(titleNameOf(tt));
+  const fx = TITLE_FX_SET.test(tt.fx) ? tt.fx : 'glow';
+  const lvl = big ? titleFxLevel(tt) : 0;
+  const overlay = lvl === 2 ? streamFxHtml(tt.c, false) : (big && tt.fx === 'starlight' ? starParticlesHtml() + streamFxHtml(tt.c, true) : '');
+  const stars = big ? `<div class="tst">${'★'.repeat(Math.max(1, Math.min(5, tt.tier)))}${'☆'.repeat(Math.max(0, 5 - Math.max(1, Math.min(5, tt.tier))))}</div>` : '';
+  return `<span class="ttl${big ? ' big' : ''}"><span class="title-text title-effect-${fx}" data-text="${nm}" style="--title-color:${tt.c}">${nm}</span>${overlay}</span>${stars}`;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 7 · 世界大战 v3 引擎（与 rank-worker/worker.js 逐字一致）
+   规则：昨日快照全员参赛 · ≥5 人开启 · 每轮随机两两配对单败淘汰（奇数轮空）
+   每场 3v3：双方前 3 角色逐位对拼 —— 角色战力 ×(0.75+种子随机0.5)
+   ×元素系数（克制1.30 / 逆克0.85 / 同元素共鸣1.05，与 elementData.js 同环）
+   三局两胜；空位不战而败；拖平则队伍总战力决胜局。存活到最后为冠军。
+   ═══════════════════════════════════════════════════════════════ */
+const WW_ELEMENT_ORDER = ['quantum', 'blaze', 'frost', 'thunder', 'void', 'holy'];
+/** 攻击方 a 对防守方 d 的元素系数（克制环：quantum→blaze→frost→thunder→void→holy→quantum） */
+function wwElemRel(a, d) {
+  if (!a || !d) return { mul: 1, tag: null };
+  if (a === d) return { mul: 1.05, tag: 'resonance' }; // 同元素·共鸣彩蛋 +5%
+  const ai = WW_ELEMENT_ORDER.indexOf(a), di = WW_ELEMENT_ORDER.indexOf(d);
+  if (ai < 0 || di < 0) return { mul: 1, tag: null };
+  if ((ai + 1) % 6 === di) return { mul: 1.30, tag: 'advantage' };    // 克制
+  if ((di + 1) % 6 === ai) return { mul: 0.85, tag: 'disadvantage' }; // 逆克
+  return { mul: 1, tag: null };
+}
+function wwCharSnap(c) {
+  return { charId: String(c.charId || c.id || 'unknown'), name: String(c.name || '?'),
+    level: +c.level || 1, stars: +c.stars || 1, power: +c.power || 0 };
+}
+/** 单场 3v3：返回 { winner:'a'|'b', score:[a胜局,b胜局], rounds:[逐回合记录] } */
+function wwMatch(A, B, rng) {
+  const rounds = [];
+  let aw = 0, bw = 0;
+  for (let i = 0; i < 3 && aw < 2 && bw < 2; i++) {
+    const ca = (A.party || [])[i] || null, cb = (B.party || [])[i] || null;
+    if (!ca && !cb) continue; // 双方空位 → 该局跳过
+    if (!ca || !cb) { // 空位不战而败
+      const win = ca ? 'a' : 'b';
+      if (ca) aw++; else bw++;
+      rounds.push({ an: ca ? ca.name : null, al: ca ? ca.level : 0, as: ca ? ca.stars : 0,
+        ac: ca ? ca.charId : null, ap: ca ? ca.power : 0,
+        bn: cb ? cb.name : null, bl: cb ? cb.level : 0, bs: cb ? cb.stars : 0,
+        bc: cb ? cb.charId : null, bp: cb ? cb.power : 0, win, tag: 'bye' });
+      continue;
+    }
+    const relA = wwElemRel(CHAR_ELEMENT[ca.charId], CHAR_ELEMENT[cb.charId]);
+    const relB = wwElemRel(CHAR_ELEMENT[cb.charId], CHAR_ELEMENT[ca.charId]);
+    const ea = (ca.power || 0) * (0.75 + rng() * 0.5) * relA.mul;
+    const eb = (cb.power || 0) * (0.75 + rng() * 0.5) * relB.mul;
+    const win = ea >= eb ? 'a' : 'b';
+    if (win === 'a') aw++; else bw++;
+    rounds.push({ an: ca.name, al: ca.level, as: ca.stars, ac: ca.charId, ap: ca.power,
+      bn: cb.name, bl: cb.level, bs: cb.stars, bc: cb.charId, bp: cb.power,
+      win, tag: relA.tag || relB.tag }); // tag 以 a 方视角记录
+  }
+  let winner;
+  if (aw === bw) { // 空位拖平（罕见）→ 队伍总战力决胜局
+    const sa = (A.party || []).reduce((s, c) => s + (c.power || 0), 0) || A.power || 1;
+    const sb = (B.party || []).reduce((s, c) => s + (c.power || 0), 0) || B.power || 1;
+    winner = sa * (0.75 + rng() * 0.5) >= sb * (0.75 + rng() * 0.5) ? 'a' : 'b';
+    rounds.push({ tiebreak: true, win: winner, an: A.name, bn: B.name });
+  } else winner = aw > bw ? 'a' : 'b';
+  return { winner, score: [aw, bw], rounds };
+}
+/**
+ * 世界大战主模拟：entries = 昨日快照阵容（全员）。
+ * <5 人 → { started:false, need }；否则完整单败淘汰 →
+ * { started:true, v:3, date, total, champion, standings, matches, byes }
+ * standings: [{slotId,name,rank,kills}]（kills=击败数=淘汰的玩家数）
+ */
+function simulateWar3(dateKey, entries) {
+  const roster = (entries || []).map(e => ({
+    slotId: String(e.slotId), name: String(e.name || '?'), power: +e.power || 0,
+    title: e.title ?? null,
+    party: (Array.isArray(e.party) ? e.party : []).slice(0, 3).map(wwCharSnap),
+  }));
+  const total = roster.length;
+  if (total < 5) return { v: 3, date: dateKey, total, started: false, need: 5 - total };
+  // 种子 = 日期 + 阵容指纹（快照已冻结 → 全设备同一战报）
+  const fp = roster.map(r => r.slotId + ':' + r.power + ':' + r.party.map(c => c.charId + c.power).join(',')).join('|');
+  const rng = mulberry32(hashStr('nqc_ww3_' + dateKey + '_' + fp));
+  // 首轮随机匹配（洗牌）
+  let alive = roster.slice();
+  for (let i = alive.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const tmp = alive[i]; alive[i] = alive[j]; alive[j] = tmp; }
+  const kills = {}; roster.forEach(r => { kills[r.slotId] = 0; });
+  const pw = {}; roster.forEach(r => { pw[r.slotId] = r.power; });
+  const matches = [], byes = [], placement = [];
+  let round = 1;
+  while (alive.length > 1) {
+    const pool = alive.slice();
+    let bye = null;
+    if (pool.length % 2 === 1) {
+      bye = pool.splice(Math.floor(rng() * pool.length), 1)[0];
+      byes.push({ round, slotId: bye.slotId, name: bye.name });
+    }
+    const next = bye ? [bye] : [];
+    for (let i = 0; i + 1 < pool.length; i += 2) {
+      const A = pool[i], B = pool[i + 1];
+      const m = wwMatch(A, B, rng);
+      const W = m.winner === 'a' ? A : B, L = m.winner === 'a' ? B : A;
+      kills[W.slotId]++;
+      matches.push({ round, a: { slotId: A.slotId, name: A.name }, b: { slotId: B.slotId, name: B.name },
+        winner: W.slotId, score: m.score, rounds: m.rounds });
+      placement.push({ slotId: L.slotId, name: L.name, roundElim: round });
+      next.push(W);
+    }
+    alive = next; // 下一轮重新随机匹配
+    for (let i = alive.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const tmp = alive[i]; alive[i] = alive[j]; alive[j] = tmp; }
+    round++;
+  }
+  const champion = alive[0];
+  // 名次：冠军 #1；其余按淘汰轮次（晚淘汰靠前），同轮按战力降序
+  const rest = placement.slice().sort((x, y) => y.roundElim - x.roundElim || pw[y.slotId] - pw[x.slotId]);
+  const standings = [{ slotId: champion.slotId, name: champion.name, rank: 1, kills: kills[champion.slotId], roundElim: 0 }]
+    .concat(rest.map((p, i) => ({ slotId: p.slotId, name: p.name, rank: i + 2, kills: kills[p.slotId], roundElim: p.roundElim })));
+  return { v: 3, date: dateKey, total, started: true,
+    champion: { slotId: champion.slotId, name: champion.name, kills: kills[champion.slotId] },
+    standings, matches, byes };
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 7.5 · 昨日榜 / 世界大战 数据聚合（Worker 优先，本机快照降级）
+   ═══════════════════════════════════════════════════════════════ */
+/** 昨日榜数据源：Worker 快照 > 本机每日首拉快照 > pending 空态 */
+function ydayData() {
+  if (YDAY && YDAY.entries && YDAY.entries.length) return { date: YDAY.date, entries: YDAY.entries, pending: false };
+  const s = loadSnap();
+  if (s && s.date === yesterdayKey8() && s.entries.length) return { date: s.date, entries: s.entries, pending: false };
+  return { date: (YDAY && YDAY.date) || yesterdayKey8(), entries: [], pending: true };
+}
+/** 昨日大战战报：Worker v3 战报 > 同一昨日快照本地模拟（同算法同种子 → 同结果） */
+function warReport() {
+  if (WAR && WAR.v === 3) return WAR;
+  const y = ydayData();
+  if (y.entries.length) return simulateWar3(y.date, y.entries);
+  return { v: 3, date: y.date, total: 0, started: false, pending: true, need: 5 };
+}
+/** 击败数小标映射：最近战报 slotId → kills */
+function killsMap() {
+  const w = warReport();
+  const m = {};
+  if (w.started && Array.isArray(w.standings)) w.standings.forEach(s => { m[s.slotId] = s.kills; });
+  return m;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   模块 8 · 渲染
    ═══════════════════════════════════════════════════════════════ */
 const $ = s => document.querySelector(s);
-let MOCK = [];
 let CUR_TAB = 'power';
-let OPEN_KEY = null;
+let OPEN_KEY = null;                 // 展开的卡片（普通榜 detail / 大战玩家战报）
+let BR_OPEN = false;                 // 完整赛程折叠
+const WOPEN = new Set();             // 赛程中展开的单场 index
 
 function toast(msg) {
   const el = $('#toast'); el.textContent = msg; el.classList.add('show');
   clearTimeout(el._tm); el._tm = setTimeout(() => el.classList.remove('show'), 2000);
 }
 function fmt(n) { return Number(n || 0).toLocaleString('en-US'); }
-function sortKey(p) { return CUR_TAB === 'boss' ? p.abyssFloor : CUR_TAB === 'ww' ? p.worldWarWins : p.power; }
-function sortName() { return CUR_TAB === 'boss' ? t('sortBoss') : CUR_TAB === 'ww' ? t('sortWw') : t('sortPower'); }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function shortId(p) { return String(p.slotId).replace(/[^A-Za-z0-9]/g, '').slice(-4).toUpperCase(); }
 
-function mergedList() {
+/** 实时榜（纯真实数据：线上=全服榜；本地=本机上传） */
+function liveList(sortMode) {
+  const mySlots = new Set(Object.keys(loadEntries()));
   let all;
-  if (ONLINE && REAL_OK) { // 线上模式：全服真实数据（不含 mock）
-    const mySlots = new Set(Object.keys(loadEntries()));
+  if (ONLINE && REAL_OK) {
     all = REAL.map(e => ({ ...e, me: mySlots.has(e.slotId) }));
-  } else { // 本地模式：mock 50 人 + 本机上传
-    const mine = Object.values(loadEntries()).map(e => ({ ...e, me: true }));
-    all = MOCK.concat(mine);
+  } else {
+    all = Object.values(loadEntries()).map(e => ({ ...e, me: true }));
   }
   const cnt = {};
   all.forEach(p => { cnt[p.name] = (cnt[p.name] || 0) + 1; });
   all.forEach(p => { p.dup = cnt[p.name] > 1; });
-  all.sort((a, b) => sortKey(b) - sortKey(a) || b.power - a.power);
+  const key = sortMode === 'boss' ? p => p.abyssFloor : p => p.power;
+  all.sort((a, b) => key(b) - key(a) || (b.power - a.power));
   all.forEach((p, i) => { p._rank = i + 1; });
   return all;
 }
-function shortId(p) { return String(p.slotId).replace(/[^A-Za-z0-9]/g, '').slice(-4).toUpperCase(); }
-function mainMetric(p) {
-  if (CUR_TAB === 'boss') return { v: fmt(p.abyssFloor), cls: 'pw3', lb: t('lbFloor') };
-  if (CUR_TAB === 'ww')   return { v: fmt(p.worldWarWins), cls: 'pw2', lb: t('lbWins') };
-  return { v: fmt(p.power), cls: 'pw' + powerTier(p.power), lb: t('lbPower') };
-}
-function avatarHtml(ch) {
-  const hue = [...String(ch.charId)].reduce((s, c) => s + c.charCodeAt(0), 0) % 360;
-  const url = AVATAR_BASE + encodeURIComponent(ch.charId) + AVATAR_SUFFIX;
-  return `<div class="av" style="background:hsl(${hue} 80% 55%)">
-    <span>${(ch.name || '?').charAt(0)}</span>
-    <img src="${url}" alt="" style="display:none"
+
+/** 角色头像（AVATAR_MAP 命中 → 图；未命中 → 色块首字母兜底） */
+function avatarHtml(ch, cls) {
+  const hue = [...String(ch.charId || ch.name || '?')].reduce((s, c) => s + c.charCodeAt(0), 0) % 360;
+  const url = AVATAR_MAP[ch.charId] || '';
+  if (!url) {
+    return `<div class="${cls}" style="background:hsl(${hue} 80% 55%)"><span>${esc((ch.name || '?').charAt(0))}</span></div>`;
+  }
+  return `<div class="${cls}" style="background:hsl(${hue} 80% 55%)">
+    <span>${esc((ch.name || '?').charAt(0))}</span>
+    <img src="${url}" alt="" loading="lazy" style="display:none"
       onload="this.style.display='block';this.previousElementSibling.style.display='none'"
       onerror="this.remove()">
   </div>`;
 }
-function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+/** 玩家卡头像 = 主队第 1 角色（无角色 → 玩家名首字母色块） */
+function playerAvatarHtml(p) {
+  const ch = (p.party && p.party[0]) || { charId: '', name: p.name };
+  return avatarHtml(ch, 'cav');
+}
+/** 击败数小标（最近战报有击杀才显示） */
+function killsChipHtml(k) {
+  if (!k || k <= 0) return '';
+  return `<span class="kchip">${SVG_SWORD}×${k}</span>`;
+}
 
-function detailHtml(p) {
+/** 通用榜单卡：头像左 + 名字称号中 + 战力右 + 击败数小标 */
+function cardHtml(p, opts) {
+  const o = opts || {};
+  const km = o.killsMap || {};
+  const kills = km[p.slotId] || 0;
+  let mv, mcls, mlb;
+  if (o.metric === 'kills') { mv = fmt(kills); mcls = 'pw2'; mlb = t('lbKills'); }
+  else if (o.metric === 'floor') { mv = fmt(p.abyssFloor) + 'F'; mcls = 'pw4'; mlb = t('lbFloor'); }
+  else { mv = fmt(p.power); mcls = 'pw' + powerTier(p.power); mlb = t('lbPower'); }
+  const topCls = p._rank === 1 ? 'top1 top10' : p._rank === 2 ? 'top2 top10' : p._rank === 3 ? 'top3 top10' : p._rank <= 10 ? 'top10' : '';
+  const nm = p.dup ? `${esc(p.name)} <span class="idtag">#${shortId(p)}</span>` : esc(p.name);
+  const ttl = titleHtml(p.title, false);
+  let meta;
+  if (o.metric === 'kills') {
+    meta = t('metaOther')(fmt(p.power), '#' + p._rank);
+  } else if (o.metric === 'floor') {
+    meta = t('metaOther')(fmt(p.power), '#' + p._rank);
+  } else {
+    meta = o.hasWar ? t('metaPower')(p.abyssFloor, kills) : t('metaPowerNoWar')(p.abyssFloor);
+  }
+  return `<div class="card ${topCls} ${p.me ? 'me-hl' : ''}" data-key="${esc(p.slotId)}">
+    <div class="rank-badge">${p._rank}</div>
+    ${playerAvatarHtml(p)}
+    <div class="info">
+      <div class="nm">${nm}</div>
+      ${ttl ? `<div class="ctitle">${ttl}</div>` : ''}
+      <div class="meta">${meta}</div>
+    </div>
+    <div class="pw"><div class="v ${mcls}">${mv}</div><div class="lb">${mlb}</div>${o.metric === 'kills' ? '' : killsChipHtml(kills)}</div>
+  </div>`;
+}
+
+/** 展开详情（slim=true 用于昨日榜快照：快照仅含 party/战力/塔/称号） */
+function detailHtml(p, slim) {
+  const ttl = titleHtml(p.title, true);
   const chars = (p.party || []).map(ch => `
     <div class="char">
-      ${avatarHtml(ch)}
+      ${avatarHtml(ch, 'av')}
       <div class="cn">${esc(ch.name)}</div>
       <div class="cs">${'★'.repeat(Math.max(1, Math.min(6, ch.stars)))} Lv.${ch.level}</div>
       <div class="cp">PWR ${fmt(ch.power)}</div>
     </div>`).join('') || `<div style="font-size:10px;color:var(--dim)">${t('noParty')}</div>`;
   const cell = (k, v, hl) => `<div class="cell"><div class="k">${k}</div><div class="v${hl ? ' hl' : ''}">${v}</div></div>`;
+  const grid = slim
+    ? `${cell(t('dRank'), p._rank ? '#' + p._rank : '—', true)}
+       ${cell(t('lbPower'), fmt(p.power))}
+       ${cell(t('dFloor'), (p.abyssFloor || 0) + t('unitF'))}
+       ${cell(t('lbKills'), fmt((warReport().standings || []).find(s => s.slotId === p.slotId)?.kills || 0), true)}`
+    : `${cell(t('dMega'), (p.megaCount || 0) + t('unitJian'), p.megaCount >= 8)}
+       ${cell(t('dEnh'), '+' + (p.maxEnhance || 0))}
+       ${cell(t('dCredits'), fmt(p.credits))}
+       ${cell(t('dGems'), fmt(p.gems), true)}
+       ${cell(t('dRank'), p.rank ? '#' + p.rank : '—', true)}
+       ${cell(t('dPort'), p.portraitCount || 0)}
+       ${cell(t('dFloor'), (p.abyssFloor || 0) + t('unitF'))}
+       ${cell(t('dCxN'), p.caixiaoniao ? t('cxnYes') : t('cxnNo'), !!p.caixiaoniao)}`;
   return `<div class="detail">
+    ${ttl ? `<div class="dtitle">${ttl}</div>` : ''}
     <div class="chars">${chars}</div>
-    <div class="dgrid">
-      ${cell(t('dMega'), p.megaCount + t('unitJian'), p.megaCount >= 8)}
-      ${cell(t('dEnh'), '+' + p.maxEnhance)}
-      ${cell(t('dCredits'), fmt(p.credits))}
-      ${cell(t('dGems'), fmt(p.gems), true)}
-      ${cell(t('dRank'), p.rank ? '#' + p.rank : '—', true)}
-      ${cell(t('dPort'), p.portraitCount)}
-      ${cell(t('dFloor'), p.abyssFloor + t('unitF'))}
-      ${cell(t('dCxN'), p.caixiaoniao ? t('cxnYes') : t('cxnNo'), !!p.caixiaoniao)}
-    </div>
+    <div class="dgrid">${grid}</div>
   </div>`;
 }
 
-function cardsHtml(list) {
-  return list.map(p => {
-    const m = mainMetric(p);
-    const topCls = p._rank === 1 ? 'top1 top10' : p._rank === 2 ? 'top2 top10' : p._rank === 3 ? 'top3 top10' : p._rank <= 10 ? 'top10' : '';
-    const nm = p.dup ? `${esc(p.name)} <span class="idtag">#${shortId(p)}</span>` : esc(p.name);
-    const meta = CUR_TAB === 'power'
-      ? t('metaPower')(fmt(p.power), p.abyssFloor, p.worldWarWins)
-      : t('metaOther')(fmt(p.power), '#' + p._rank);
-    return `<div class="card ${topCls} ${p.me ? 'me-hl' : ''}" data-key="${esc(p.slotId)}">
-      <div class="rank-badge">${p._rank}</div>
-      <div class="info"><div class="nm">${nm}</div><div class="meta">${meta}</div></div>
-      <div class="pw"><div class="v ${m.cls}">${m.v}</div><div class="lb">${m.lb}</div></div>
-    </div>${OPEN_KEY === p.slotId ? detailHtml(p) : ''}`;
-  }).join('');
+/* ─── 总榜 / 世界BOSS ─── */
+function liveBoardHtml() {
+  const sortMode = CUR_TAB === 'boss' ? 'boss' : 'power';
+  const list = liveList(sortMode);
+  const km = killsMap();
+  const hasWar = Object.keys(km).length > 0;
+  let html = '';
+  if (!list.length) { // 无数据 → 虚位以待引导
+    html += `<div class="empty"><div class="ico">${SVG_GLOBE}</div>
+      <div class="p1">${t('emptyTitleOnline')}</div><div class="p2">${t('emptySubOnline')}</div></div>`;
+  }
+  html += list.map(p => cardHtml(p, { metric: sortMode === 'boss' ? 'floor' : 'power', killsMap: km, hasWar })
+    + (OPEN_KEY === p.slotId ? detailHtml(p, false) : '')).join('');
+  html += `<div class="board-foot">${t('boardFoot')(list.length, sortMode === 'boss' ? t('sortBoss') : t('sortPower'))}<br><span class="noreward">${t('liveNoReward')}</span></div>`;
+  return html;
 }
 
-/* ─── 世界大战模拟（昨日战报，种子稳定；WW Tab 顶部展示） ─── */
-function simulateWW(dateStr) {
-  const rng = mulberry32(hashStr('nqc_ww_sim_' + dateStr));
-  const roster = genMockPlayers(dateStr).slice(0, 15)
-    .map(p => ({ name: p.name, power: p.party.reduce((s, c) => s + c.power, 0), me: false }));
-  const mine = Object.values(loadEntries()).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))[0];
-  if (mine && mine.party && mine.party.length) {
-    roster.push({ name: mine.name, power: mine.party.reduce((s, c) => s + (c.power || 0), 0) || mine.power, me: true, wwWins: mine.worldWarWins });
-  }
-  let alive = roster.slice();
-  const total = alive.length;
-  let playerRank = null;
-  while (alive.length > 1) {
-    const rolled = alive.map(u => ({ u, eff: u.power * (0.8 + rng() * 0.4) }));
-    rolled.sort((a, b) => a.eff - b.eff);
-    const dead = rolled[0].u;
-    alive = alive.filter(u => u !== dead);
-    if (dead.me) playerRank = alive.length + 1;
-  }
-  const champion = alive[0];
-  if (champion.me) playerRank = 1;
-  return { champion, playerRank, total, entered: !!mine };
+/* ─── 昨日榜（每日 0 点 UTC+8 结算封存 · 昨日数据不变） ─── */
+function ydayRewardFor(slotId) {
+  const y = ydayData();
+  if (!y.entries.length) return null;
+  const sorted = y.entries.slice().sort((a, b) => (b.power || 0) - (a.power || 0));
+  const idx = sorted.findIndex(e => e.slotId === slotId);
+  if (idx < 0 || idx > 2) return null;
+  const rank = idx + 1;
+  const type = rank === 1 ? 'RANK_D1' : 'RANK_D3';
+  const tier = GIFT_TIERS.find(x => x.type === type);
+  const mine = loadEntries()[slotId] || {};
+  const realRow = REAL.find(e => e.slotId === slotId) || {};
+  const lastTs = realRow.lastTs || mine.lastTs || mine.ts || 0;
+  const anchor = Math.max(lastTs + 60000, settleAnchorMs(y.date)); // ts 链：晚于任何已领奖码
+  const payload = '00' + encodeRankUploadTs(anchor);
+  return { rank, type, tier, code: `NQC-${type}-${payload}-${sign16(type + '-' + payload)}` };
 }
-
-function wwReportHtml() {
-  if (ONLINE) { // 线上模式：服务器每日种子模拟战报
-    if (!WAR || !WAR.champion) return `<div class="ww-report"><div class="wt">${t('wwTitle')}</div><div class="ww-hint" style="color:var(--dim)">⏳ ${t('wwBefore')}</div></div>`;
-    const mySlots = new Set(Object.keys(loadEntries()));
-    const mineRow = (WAR.results || []).find(r => r.slotId && mySlots.has(r.slotId));
-    const champIsMe = !!(WAR.champion.slotId && mySlots.has(WAR.champion.slotId));
-    let codeHtml = '';
-    if (champIsMe) {
-      let codes = {};
-      try { codes = JSON.parse(localStorage.getItem(LS_WWCODE) || '{}'); } catch {}
-      if (!codes[WAR.date]) {
-        const mine = Object.values(loadEntries()).find(e => e.slotId === WAR.champion.slotId) || {};
-        const w = Math.max(0, Math.min(255, Math.floor(mine.worldWarWins ?? 1)));
-        const rand = Array.from({ length: 6 }, () => '0123456789ABCDEF'[(Math.random() * 16) | 0]).join('');
-        const payload = w.toString(16).toUpperCase().padStart(2, '0') + rand;
-        codes[WAR.date] = `NQC-RANK_WW-${payload}-${sign16('RANK_WW-' + payload)}`;
-        try { localStorage.setItem(LS_WWCODE, JSON.stringify(codes)); } catch {}
-      }
-      codeHtml = `<div class="ww-code" data-copy="${codes[WAR.date]}">${codes[WAR.date]}</div><div class="ww-hint">🏅 ${t('wwReward')}</div>`;
-    } else {
-      codeHtml = `<div class="ww-hint" style="color:var(--dim)">${t('wwNeed')}</div>`;
-    }
-    return `<div class="ww-report">
-      <div class="wt">${t('wwTitle')}</div>
-      <div class="ww-champ">
-        <div class="crown">👑</div>
-        <div>
-          <div class="who">${t('wwChamp')(esc(WAR.champion.name))}${champIsMe ? ' · YOU!' : ''}</div>
-          <div class="sub2">${mineRow ? t('wwYou')(mineRow.rank, WAR.total) : t('wwYouOut')} · ${WAR.date}</div>
-        </div>
-      </div>${codeHtml}</div>`;
+function ydayBoardHtml() {
+  const y = ydayData();
+  const mySlots = new Set(Object.keys(loadEntries()));
+  let html = `<div class="y-head">
+    <div class="wt">${t('ydayTitle')}<span class="date">${y.date}</span></div>
+    <div class="y-seal">${t('ydaySealed')}</div>`;
+  if (y.pending) {
+    html += `<div class="ww-gate"><div class="g1">${t('ydayEmpty')}</div><div class="g2">${t('ydayEmptySub')}</div></div></div>`;
+    return html;
   }
-  const now = new Date();
-  if (now.getHours() < 12) return `<div class="ww-report"><div class="wt">${t('wwTitle')}</div><div class="ww-hint" style="color:var(--dim)">⏳ ${t('wwBefore')}</div></div>`;
-  const yDate = yesterdayStr();
-  const res = simulateWW(yDate);
-  let codeHtml = '';
-  if (res.champion.me) {
-    // 世界大战奖励码: NQC-RANK_WW-{ww2hex+6rand}-{sig16}（与 cdkData.generateRankWwCdk 同口径）
-    let codes = {};
-    try { codes = JSON.parse(localStorage.getItem(LS_WWCODE) || '{}'); } catch {}
-    if (!codes[yDate]) {
-      const w = Math.max(0, Math.min(255, Math.floor(res.champion.wwWins ?? 1)));
-      const rand = Array.from({ length: 6 }, () => '0123456789ABCDEF'[(Math.random() * 16) | 0]).join('');
-      const payload = w.toString(16).toUpperCase().padStart(2, '0') + rand;
-      codes[yDate] = `NQC-RANK_WW-${payload}-${sign16('RANK_WW-' + payload)}`;
-      try { localStorage.setItem(LS_WWCODE, JSON.stringify(codes)); } catch {}
-    }
-    codeHtml = `<div class="ww-code" data-copy="${codes[yDate]}">${codes[yDate]}</div><div class="ww-hint">🏅 ${t('wwReward')}</div>`;
+  // 昨日奖励区：我是昨日前 3 → 大按钮回传；否则引导文案
+  const mineBest = Object.keys(loadEntries()).map(sid => ydayRewardFor(sid)).filter(Boolean).sort((a, b) => a.rank - b.rank)[0];
+  if (mineBest) {
+    html += `<div class="y-reward">
+      <div class="t">${t('ydayReward')} · ${t('ydayMe')(mineBest.rank, t('tierName')[mineBest.type])}</div>
+      <div class="r">${t('giftReward')(mineBest.tier)}</div>
+      <div class="ww-code" data-copy="${mineBest.code}">${mineBest.code}</div>
+      <div class="ww-act"><button class="btn-xl" data-copy="${mineBest.code}" data-copied="${t('ydayCopied')}">
+        ${t('ydayCopyBig')}<span class="xl-sub">${t('ydayCopySub')}</span></button></div>
+      <div class="ww-hint" style="color:var(--dim)">${t('ydayCodeHint')}</div>
+    </div>`;
   } else {
-    codeHtml = `<div class="ww-hint" style="color:var(--dim)">${t('wwNeed')}</div>`;
+    html += `<div class="y-reward"><div class="t">${t('ydayReward')}</div>
+      <div class="ww-hint" style="color:var(--dim);margin-top:5px">${t('ydayNotMe')}</div></div>`;
+  }
+  html += `</div>`;
+  // 昨日完整榜（冻结，按战力降序；可展开快照详情）
+  const km = killsMap();
+  const list = y.entries.slice().sort((a, b) => (b.power || 0) - (a.power || 0))
+    .map((e, i) => ({ ...e, _rank: i + 1, me: mySlots.has(e.slotId) }));
+  const cnt = {};
+  list.forEach(p => { cnt[p.name] = (cnt[p.name] || 0) + 1; });
+  list.forEach(p => { p.dup = cnt[p.name] > 1; });
+  html += list.map(p => cardHtml(p, { metric: 'power', killsMap: km, hasWar: Object.keys(km).length > 0 })
+    + (OPEN_KEY === p.slotId ? detailHtml(p, true) : '')).join('');
+  html += `<div class="board-foot">${t('boardFoot')(list.length, t('sortPower'))}<br><span class="noreward">${t('ydaySealed')}</span></div>`;
+  return html;
+}
+
+/* ─── 世界大战（昨日快照全员 · 3v3 单败淘汰 · ≥5 人开启） ─── */
+function wwChampionCode(war, slotId) {
+  const kills = Math.max(0, Math.min(255, (war.champion.kills | 0)));
+  const mine = loadEntries()[slotId] || {};
+  const realRow = REAL.find(e => e.slotId === slotId) || {};
+  const lastTs = realRow.lastTs || mine.lastTs || mine.ts || 0;
+  const anchor = Math.max(lastTs + 60000, settleAnchorMs(war.date));
+  const payload = kills.toString(16).toUpperCase().padStart(2, '0') + encodeRankUploadTs(anchor);
+  return `NQC-RANK_WW-${payload}-${sign16('RANK_WW-' + payload)}`;
+}
+/** 大战战报卡（顶部）：冠军 / 未开启进度 / 结算中 + 今日报名预告 */
+function wwReportCardHtml(war, mySlots) {
+  const date = war.date || '';
+  if (war.pending) {
+    return `<div class="ww-report"><div class="wt">${t('wwTitle')}<span class="date">${date}</span></div>
+      <div class="ww-gate"><div class="g1">${t('wwPending')}</div><div class="g2">${t('wwNeed5Sub')}</div></div>
+      <div class="ww-preview">${t('wwPreview')(ONLINE && REAL_OK ? REAL.length : Object.keys(loadEntries()).length)}</div></div>`;
+  }
+  if (!war.started) {
+    const have = war.total || 0, need = 5;
+    const pct = Math.min(100, Math.round(have / need * 100));
+    return `<div class="ww-report"><div class="wt">${t('wwTitle')}<span class="date">${date}</span></div>
+      <div class="ww-gate">
+        <div class="g1">${t('wwNeed5')(have, need)}</div>
+        <div class="gbar"><i style="width:${pct}%"></i></div>
+        <div class="g2">${t('wwNeed5Sub')}</div>
+      </div>
+      <div class="ww-preview">${t('wwPreview')(ONLINE && REAL_OK ? REAL.length : Object.keys(loadEntries()).length)}</div></div>`;
+  }
+  const champIsMe = mySlots.has(war.champion.slotId);
+  const myRow = (war.standings || []).find(s => mySlots.has(s.slotId));
+  let rewardHtml = '';
+  if (champIsMe) {
+    const code = wwChampionCode(war, war.champion.slotId);
+    rewardHtml = `<div class="ww-code" data-copy="${code}">${code}</div>
+      <div class="ww-act"><button class="btn-xl" data-copy="${code}" data-copied="${t('wwCopied')}">
+        ${t('wwCopyBig')}<span class="xl-sub">${t('wwCopySub')}</span></button></div>
+      <div class="ww-hint">${t('wwReward')}</div>`;
+  } else {
+    rewardHtml = `<div class="ww-hint" style="color:var(--dim)">${t('wwNeed')}</div>`;
   }
   return `<div class="ww-report">
-    <div class="wt">${t('wwTitle')}</div>
+    <div class="wt">${t('wwTitle')}<span class="date">${date}</span></div>
     <div class="ww-champ">
-      <div class="crown">👑</div>
+      <img class="crown-img" src="${RANK_MEDAL[1]}" alt="No.1">
       <div>
-        <div class="who">${t('wwChamp')(esc(res.champion.name))}${res.champion.me ? ' · YOU!' : ''}</div>
-        <div class="sub2">${res.entered ? t('wwYou')(res.playerRank, res.total) : t('wwYouOut')} · ${yDate}</div>
+        <div class="who">${t('wwChamp')(esc(war.champion.name))}${champIsMe ? ' · YOU!' : ''}</div>
+        <div class="sub2">${t('wwKills')(war.champion.kills)} · ${t('wwChampionTag')}</div>
       </div>
-    </div>${codeHtml}</div>`;
+    </div>
+    <div class="ww-meta-row">
+      <div class="ww-meta-cell"><div class="k">${t('wwPlayers')}</div><div class="v">${war.total}</div></div>
+      <div class="ww-meta-cell"><div class="k">${t('lbKills')}</div><div class="v">${war.champion.kills}</div></div>
+      <div class="ww-meta-cell"><div class="k">${myRow ? t('wwYouRank') : '—'}</div><div class="v">${myRow ? '#' + myRow.rank : '—'}</div></div>
+    </div>
+    ${rewardHtml}
+    <div class="ww-preview">${t('wwPreview')(ONLINE && REAL_OK ? REAL.length : Object.keys(loadEntries()).length)}</div>
+  </div>`;
+}
+/** 单回合战斗记录行："Naomi(星5 Lv80) 击破 卡莲(星4 Lv72)" + 元素标签 */
+function warRoundLineHtml(r, i, focusSide) {
+  if (r.tiebreak) {
+    return `<div class="wb-r w"><span class="rn">TB</span><span>${t('wwTiebreak')} · <span class="cw">${esc(r.win === 'a' ? r.an : r.bn)}</span></span></div>`;
+  }
+  const aWin = r.win === 'a';
+  const wLabel = t('wwChar')(aWin ? r.an : r.bn, aWin ? r.as : r.bs, aWin ? r.al : r.bl);
+  const lLabel = t('wwChar')(aWin ? r.bn : r.an, aWin ? r.bs : r.as, aWin ? r.bl : r.al);
+  let tag = '';
+  if (r.tag === 'resonance') tag = `<span class="etag res">${t('tagRes')}</span>`;
+  else if (r.tag === 'advantage') tag = aWin ? `<span class="etag adv">${t('tagAdv')}</span>` : `<span class="etag dis">${t('tagDis')}</span>`;
+  else if (r.tag === 'disadvantage') tag = aWin ? `<span class="etag dis">${t('tagDis')}</span>` : `<span class="etag adv">${t('tagAdv')}</span>`;
+  else if (r.tag === 'bye') tag = `<span class="etag bye">${t('tagBye')}</span>`;
+  const winnerSide = aWin ? 'a' : 'b';
+  const cls = focusSide ? (winnerSide === focusSide ? 'w' : 'l') : (aWin ? 'w' : 'l');
+  return `<div class="wb-r ${cls}"><span class="rn">R${i + 1}</span><span>${t('wwKo')(`<span class="cw">${esc(wLabel)}</span>`, esc(lLabel))} ${tag}</span></div>`;
+}
+/** 玩家完整对战记录（点击参赛者卡片展开）：每场对手 + 逐回合 + 轮空 + 最终名次 */
+function warPlayerLogHtml(war, sid) {
+  const mine = (war.matches || []).filter(m => m.a.slotId === sid || m.b.slotId === sid)
+    .sort((x, y) => x.round - y.round);
+  const byes = (war.byes || []).filter(b => b.slotId === sid);
+  const standing = (war.standings || []).find(s => s.slotId === sid);
+  const maxRound = (war.matches || []).reduce((s, m) => Math.max(s, m.round), 0);
+  let html = `<div class="wlog"><div class="wl-cap">${t('wwRecord')} · #${standing ? standing.rank : '?'}</div>`;
+  const rounds = [...new Set([...mine.map(m => m.round), ...byes.map(b => b.round)])].sort((a, b) => a - b);
+  for (const r of rounds) {
+    const bye = byes.find(b => b.round === r);
+    if (bye) html += `<div class="wl-bye">${t('wwRound')(r)} · ${t('wwBye')}</div>`;
+    const m = mine.find(x => x.round === r);
+    if (!m) continue;
+    const side = m.a.slotId === sid ? 'a' : 'b';
+    const foe = side === 'a' ? m.b : m.a;
+    const won = m.winner === sid;
+    const rn = r === maxRound ? t('wwFinal') : t('wwRound')(r);
+    html += `<div class="wl-match">
+      <div class="wl-mhead ${won ? 'win' : 'lose'}"><span class="rn">${rn}</span>
+        <span class="foe">${t('wwVs')(esc(m.a.name), esc(m.b.name))}</span>
+        <span class="sc">${m.score[0]}:${m.score[1]}</span></div>
+      ${m.rounds.map((rr, i) => warRoundLineHtml(rr, i, side)).join('')}
+    </div>`;
+  }
+  if (standing && standing.rank > 1 && standing.roundElim) {
+    html += `<div class="wl-elim">${t('wwElim')(standing.roundElim)} · ${t('wwKills')(standing.kills)}</div>`;
+  } else if (standing && standing.rank === 1) {
+    html += `<div class="wl-elim"><b>${t('wwChampionTag')}</b> · ${t('wwKills')(standing.kills)}</div>`;
+  }
+  return html + '</div>';
+}
+/** 完整赛程（折叠；每场可展开逐回合） */
+function bracketHtml(war) {
+  const maxRound = (war.matches || []).reduce((s, m) => Math.max(s, m.round), 0);
+  let body = '';
+  for (let r = 1; r <= maxRound; r++) {
+    body += `<div class="br-round"><div class="br-rn">${r === maxRound ? t('wwFinal') : t('wwRound')(r)}</div>`;
+    (war.byes || []).filter(b => b.round === r).forEach(b => {
+      body += `<div class="wl-bye">${esc(b.name)} · ${t('wwBye')}</div>`;
+    });
+    (war.matches || []).filter(m => m.round === r).forEach(m => {
+      const mid = m.round + ':' + m.a.slotId + ':' + m.b.slotId;
+      const aWin = m.winner === m.a.slotId;
+      body += `<div class="wwm ${WOPEN.has(mid) ? 'open' : ''}" data-mid="${esc(mid)}">
+        <div class="wl-mhead">
+          <span class="foe"><span class="${aWin ? 'mwin' : 'mlose'}">${esc(m.a.name)}</span> <i>VS</i> <span class="${aWin ? 'mlose' : 'mwin'}">${esc(m.b.name)}</span></span>
+          <span class="sc ${aWin ? '' : ''}">${m.score[0]}:${m.score[1]}</span></div>
+        <div class="mrounds">${m.rounds.map((rr, i) => warRoundLineHtml(rr, i, null)).join('')}</div>
+      </div>`;
+    });
+    body += '</div>';
+  }
+  return `<div class="bracket ${BR_OPEN ? 'open' : ''}">
+    <button class="br-tog" id="brTog">${t('wwBracket')} (${(war.matches || []).length})<small>${t('wwBracketSub')}</small></button>
+    <div class="br-body">${body}</div>
+  </div>`;
+}
+/** 世界大战 Tab 完整视图：战报卡 + 参赛者榜（按大战名次，主显击败数）+ 完整赛程 */
+function wwBoardHtml() {
+  const war = warReport();
+  const mySlots = new Set(Object.keys(loadEntries()));
+  let html = wwReportCardHtml(war, mySlots);
+  if (war.started) {
+    const y = ydayData();
+    const entOf = sid => y.entries.find(e => e.slotId === sid) || { slotId: sid, name: (war.standings.find(s => s.slotId === sid) || {}).name || '?', power: 0, party: [] };
+    const cnt = {};
+    war.standings.forEach(s => { cnt[s.name] = (cnt[s.name] || 0) + 1; });
+    html += war.standings.map(s => {
+      const ent = entOf(s.slotId);
+      const p = { ...ent, name: s.name, _rank: s.rank, me: mySlots.has(s.slotId), dup: cnt[s.name] > 1 };
+      const card = cardHtml(p, { metric: 'kills', killsMap: { [s.slotId]: s.kills } });
+      return card + (OPEN_KEY === s.slotId ? warPlayerLogHtml(war, s.slotId) : '');
+    }).join('');
+    html += bracketHtml(war);
+  }
+  return html;
 }
 
-/* ─── 主榜渲染 ─── */
+/* ─── 主榜渲染（按 Tab 分发） ─── */
 function renderBoard() {
   const board = $('#board');
   board.innerHTML = Array.from({ length: 8 }, () =>
@@ -934,20 +1753,12 @@ function renderBoard() {
      <div style="flex:1"><i style="width:55%;height:12px"></i><i style="width:35%;height:9px;margin-top:6px"></i></div>
      <i style="width:60px;height:18px"></i></div>`).join('');
   setTimeout(() => {
-    const list = mergedList();
     let html = '';
-    if (CUR_TAB === 'ww') html += wwReportHtml();
-    if (ONLINE && REAL_OK && !list.length) { // 线上全服榜为空 → 虚位以待引导
-      html += `<div class="empty"><div class="ico">🌐</div>
-        <div class="p1">${t('emptyTitleOnline')}</div><div class="p2">${t('emptySubOnline')}</div></div>`;
-    } else if (!(ONLINE && REAL_OK) && !Object.keys(loadEntries()).length) {
-      html += `<div class="empty"><div class="ico">📡</div>
-        <div class="p1">${t('emptyTitle')}</div><div class="p2">${t('emptySub')}</div></div>`;
-    }
-    html += cardsHtml(list);
-    html += `<div class="board-foot">${t('boardFoot')(list.length, sortName())}</div>`;
+    if (CUR_TAB === 'ww') html = wwBoardHtml();
+    else if (CUR_TAB === 'yday') html = ydayBoardHtml();
+    else html = liveBoardHtml();
     board.innerHTML = html;
-  }, 260);
+  }, 200);
 }
 
 /* ─── 英雄区：我的卡片 ─── */
@@ -957,9 +1768,7 @@ function myBestEntry() { // 最新上传的存档作为"我"
   return all.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))[0];
 }
 function myOverallRank(slotId) { // 总榜名次（礼包档位锚定总榜）
-  const saved = CUR_TAB; CUR_TAB = 'power';
-  const list = mergedList(); CUR_TAB = saved;
-  const me = list.find(p => p.me && p.slotId === slotId);
+  const me = liveList('power').find(p => p.me && p.slotId === slotId);
   return me ? me._rank : null;
 }
 function isTsClaimed(slotId, ts) {
@@ -972,29 +1781,34 @@ function renderMe() {
   if (!me) { el.className = 'me empty'; el.innerHTML = `<div>${t('meEmpty')}</div>`; return; }
   const rank = myOverallRank(me.slotId);
   const fresh = me.ts > 0 && !isTsClaimed(me.slotId, me.ts);
+  const kills = killsMap()[me.slotId] || 0;
   el.className = 'me';
   el.innerHTML = `
     <div class="medal"><div class="r">${rank ? '#' + rank : '—'}</div><div class="k">${t('meRank')}</div></div>
     <div class="meinfo">
       <div class="menm">${esc(me.name)}</div>
-      <div class="memeta">${t('mePower')} <b>${fmt(me.power)}</b> · ${t('meFloor')} <b>${me.abyssFloor}F</b> · ${t('meWins')} <b>${me.worldWarWins}${t('unitWin')}</b></div>
+      <div class="memeta">${t('mePower')} <b>${fmt(me.power)}</b> · ${t('meFloor')} <b>${me.abyssFloor}F</b> · ${t('meKills')} <b>${kills}</b></div>
     </div>
     <div class="mestate ${fresh ? 'can' : 'done'}">${fresh ? '● ' + t('canClaim') : t('claimed')}</div>`;
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   模块 8 · 每日礼包（领奖新鲜度：每次上传 ts 只能领一次）
+   模块 8.5 · 每日礼包（领奖新鲜度：每次上传 ts 只能领一次；大按钮回传）
    ═══════════════════════════════════════════════════════════════ */
 function giftTierOf(rank) { return GIFT_TIERS.find(x => rank <= x.maxRank); }
 function genGiftCode(type) {
-  const payload = Array.from({ length: 8 }, () => '0123456789ABCDEF'[(Math.random() * 16) | 0]).join('');
+  const payload = '00' + encodeRankUploadTs(Date.now());
   return `NQC-${type}-${payload}-${sign16(type + '-' + payload)}`;
+}
+function bigCopyBtnHtml(code, copiedMsg) {
+  return `<button class="btn-xl" data-copy="${code}" data-copied="${copiedMsg || t('giftCopied')}">
+    ${t('giftCopyBig')}<span class="xl-sub">${t('giftCopySub')}</span></button>`;
 }
 function renderGift() {
   const body = $('#giftBody');
   const me = myBestEntry();
   if (!me) {
-    body.innerHTML = `<div class="gift-none">${t('giftNone')}</div>`;
+    body.innerHTML = `<div class="gift-none">${t('giftNone')}</div><div class="gift-note">${t('giftNote')}</div>`;
     $('#giftDot').style.display = 'none';
     return;
   }
@@ -1003,7 +1817,7 @@ function renderGift() {
   const claimedList = loadClaimed()[me.slotId] || [];
   const rec = claimedList.find(r => r.ts === me.ts);
   $('#giftDot').style.display = (!rec && me.ts > 0) ? '' : 'none';
-  if (rec) { // 本次 ts 已领 → 锁定，提示再次上传
+  if (rec) { // 本次 ts 已领 → 锁定，展示码 + 大按钮回传，提示再次上传
     body.innerHTML = `
       <div class="gift-tier"><div>
         <div class="t">${t('giftTier')(rank)} · ${t('tierName')[tier.type]}</div>
@@ -1011,13 +1825,11 @@ function renderGift() {
       </div></div>
       <div class="giftcode" style="display:${rec.code ? 'block' : 'none'}">
         <div class="code">${rec.code}</div>
-        <div class="row">
-          <button class="btn ghost" style="height:32px;padding:0 14px" id="giftCopyBtn">${t('giftCopy')}</button>
-          <span class="hint">${t('giftHint')}</span>
-        </div>
+        <div class="ww-act">${bigCopyBtnHtml(rec.code)}</div>
+        <div class="hint">${t('giftHint')}</div>
       </div>
-      <div class="gift-done" style="display:block">${t('giftDone')}<span class="re">🔄 ${t('giftReupload')}</span></div>`;
-    $('#giftCopyBtn').addEventListener('click', () => copyText(rec.code));
+      <div class="gift-done" style="display:block">${t('giftDone')}<span class="re">${t('giftReupload')}</span></div>
+      <div class="gift-note">${t('giftNote')}</div>`;
     return;
   }
   body.innerHTML = `
@@ -1026,13 +1838,7 @@ function renderGift() {
       <div class="r">${t('giftReward')(tier)}</div>
     </div>
     <button class="btn pink" id="giftBtn" style="height:38px">${t('giftClaimBtn')}</button></div>
-    <div class="giftcode" id="giftCodeBox">
-      <div class="code" id="giftCodeText"></div>
-      <div class="row">
-        <button class="btn ghost" id="giftCopyBtn" style="height:32px;padding:0 14px">${t('giftCopy')}</button>
-        <span class="hint">${t('giftHint')}</span>
-      </div>
-    </div>`;
+    <div class="gift-note">${t('giftNote')}</div>`;
   $('#giftBtn').addEventListener('click', async () => {
     if (ONLINE) { // 线上模式：服务器按全服名次签发奖励码（同一上传 ts 仅可领一次）
       $('#giftBtn').disabled = true;
@@ -1062,16 +1868,14 @@ function renderGift() {
     renderGift(); renderMe();
     toast(t('giftGenOk'));
   });
-  $('#giftCopyBtn').addEventListener('click', () => copyText($('#giftCodeText').textContent));
-  $('#giftCodeBox').style.display = 'none'; // 领取后 renderGift 重绘为已领视图并展示码
 }
-async function copyText(text) {
+async function copyText(text, msg) {
   try { await navigator.clipboard.writeText(text); }
   catch {
     const ta = document.createElement('textarea'); ta.value = text;
     document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
   }
-  toast(t('giftCopied'));
+  toast(msg || t('giftCopied'));
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1084,12 +1888,12 @@ function applyI18n() {
   $('#uiLive').textContent = ONLINE ? t('liveOnline') : t('live');
   $('#codeInput').placeholder = t('codePh');
   $('#codeBtn').textContent = t('codeBtn');
-  $('#demoLink').textContent = t('demo');
   $('#uiGiftTitle').textContent = t('giftTitle');
   document.querySelector('[data-tt="tabPower"]').textContent = t('tabPower');
   document.querySelector('[data-tt="tabBoss"]').textContent = t('tabBoss');
+  document.querySelector('[data-tt="tabYday"]').textContent = t('tabYday');
   document.querySelector('[data-tt="tabWw"]').textContent = t('tabWw');
-  document.title = t('title') + ' · NAOMI WORLD RANKING';
+  document.title = t('title') + ' · STAR ROAD RANKING';
   document.querySelectorAll('#langBox button').forEach(b => b.classList.toggle('on', b.dataset.lang === LANG));
 }
 $('#langBox').addEventListener('click', e => {
@@ -1104,8 +1908,23 @@ $('#langBox').addEventListener('click', e => {
    模块 10 · 事件
    ═══════════════════════════════════════════════════════════════ */
 $('#board').addEventListener('click', e => {
-  const wc = e.target.closest('.ww-code');
-  if (wc) { copyText(wc.dataset.copy); return; }
+  // 复制按钮 / 码块（一键复制回游戏）
+  const cp = e.target.closest('[data-copy]');
+  if (cp) { e.stopPropagation(); copyText(cp.dataset.copy, cp.dataset.copied || t('giftCopied')); return; }
+  // 完整赛程折叠
+  const tog = e.target.closest('#brTog');
+  if (tog) { BR_OPEN = !BR_OPEN; renderBoard(); return; }
+  // 赛程单场展开逐回合
+  const wwm = e.target.closest('.wwm');
+  if (wwm) {
+    const mid = wwm.dataset.mid;
+    if (WOPEN.has(mid)) WOPEN.delete(mid); else WOPEN.add(mid);
+    wwm.classList.toggle('open');
+    const rounds = wwm.querySelector('.mrounds');
+    if (rounds) rounds.style.display = wwm.classList.contains('open') ? 'block' : 'none';
+    return;
+  }
+  // 卡片展开（普通榜=详情 / 大战=玩家对战记录 / 昨日榜=快照详情）
   const card = e.target.closest('.card');
   if (!card) return;
   const key = card.dataset.key;
@@ -1121,6 +1940,12 @@ document.querySelectorAll('.tabs button').forEach(btn => {
     renderBoard();
   });
 });
+/* 量子同步 loading 开关 */
+function qload(show) {
+  const el = $('#qload');
+  if (show) { $('#qloadTxt').textContent = t('uploading'); el.classList.add('show'); }
+  else el.classList.remove('show');
+}
 $('#codeBtn').addEventListener('click', async () => {
   const msg = $('#codeMsg');
   const raw = $('#codeInput').value;
@@ -1133,47 +1958,40 @@ $('#codeBtn').addEventListener('click', async () => {
   }
   if (ONLINE) { // 线上模式：先 POST 到 Worker，验签+新鲜度由服务器裁决
     msg.className = 'codemsg'; msg.textContent = '…';
+    qload(true);
     try {
       const code = String(raw || '').trim().replace(/\s+/g, '');
       const j = await apiPost('/rank', { code });
       const entries = loadEntries(); // 本地也存一份：标识"我" + 领奖 ts 锚点
       entries[v.data.slotId] = { ...v.data, savedAt: Date.now() };
       saveEntries(entries);
-      await refreshReal(); await refreshWar();
+      await refreshReal(); await refreshWar(); await refreshYday();
       msg.className = 'codemsg ok';
       msg.textContent = `${t('codeOkOnline')(v.data.name)} · #${j.rank}`;
+      toast(t('uploadDone'));
     } catch (e) {
+      qload(false);
       msg.className = 'codemsg err';
       msg.textContent = (e.message === 'stale' || e.message === 'future') ? t('codeErrStale')
         : e.message === 'signature' ? t('codeErrSig') : t('netErr');
       return;
     }
-  } else { // 本地模式：仅存本机
+    qload(false);
+  } else { // 本地模式：仅存本机（短暂 loading 给明确反馈）
+    qload(true);
     const entries = loadEntries();
     entries[v.data.slotId] = { ...v.data, savedAt: Date.now() };
     saveEntries(entries);
+    maybeSnapLocal(Object.values(entries));
+    await new Promise(r => setTimeout(r, 650));
+    qload(false);
     msg.className = 'codemsg ok';
     msg.textContent = t('codeOk')(v.data.name);
+    toast(t('uploadDone'));
   }
   $('#codeInput').value = '';
-  OPEN_KEY = null;
+  OPEN_KEY = v.data.slotId; // 自动展开"我"的条目，明确看到已上榜
   renderMe(); renderGift(); renderBoard();
-});
-$('#demoLink').addEventListener('click', () => {
-  const demo = {
-    v: 1, slotId: 'DEMO01', name: 'ナオミ推し', power: 152300,
-    party: [
-      { charId: 'naomi', name: 'ナオミ', level: 80, stars: 6, power: 61500 },
-      { charId: 'rin',   name: 'リン',   level: 72, stars: 5, power: 50400 },
-      { charId: 'sora',  name: 'ソラ',   level: 68, stars: 5, power: 40400 },
-    ],
-    megaCount: 9, maxEnhance: 14, credits: 3250000, gems: 8800, rank: 1,
-    portraitCount: 41, abyssFloor: 108, caixiaoniao: 1, worldWarWins: 7,
-    ts: Date.now(),
-  };
-  const payload = b64urlEncode(JSON.stringify(demo));
-  $('#codeInput').value = `NQCRANK-${payload}-${sign16('NQCRANK' + payload)}`;
-  toast(t('demoOk'));
 });
 /* 礼包悬浮卡开合 */
 const sheet = $('#giftSheet'), mask = $('#sheetMask');
@@ -1198,11 +2016,13 @@ mask.addEventListener('click', closeSheet);
     p2.src = ART_HERO_FALLBACK;
   };
   probe.src = ART_HERO;
-  MOCK = genMockPlayers(todayStr());
   applyI18n(); renderMe(); renderGift(); renderBoard();
-  if (ONLINE) { // 线上模式：拉取全服真实榜 + 服务器战报后重绘
+  if (ONLINE) { // 线上模式：拉全服实时榜 + 昨日榜快照 + 昨日大战战报后重绘
     refreshReal().then(() => { renderMe(); renderGift(); renderBoard(); });
-    refreshWar().then(() => { if (CUR_TAB === 'ww') renderBoard(); });
+    refreshYday().then(() => { if (CUR_TAB === 'yday' || CUR_TAB === 'ww') renderBoard(); });
+    refreshWar().then(() => { renderMe(); if (CUR_TAB === 'ww') renderBoard(); else if (CUR_TAB !== 'yday') renderBoard(); });
+  } else {
+    maybeSnapLocal(Object.values(loadEntries()));
   }
 })();
 </script>
