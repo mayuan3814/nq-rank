@@ -556,6 +556,7 @@ body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
         <button class="btn" id="codeBtn"></button>
       </div>
       <div class="codemsg" id="codeMsg"></div>
+      <button class="btn" id="syncBtn" style="width:100%;margin-top:8px;border-color:rgba(74,222,128,.45);color:#4ade80;background:rgba(74,222,128,.08)"></button>
     </div>
   </header>
 
@@ -897,6 +898,7 @@ const I18N = {
     tierName: { RANK_D1: '第 1 名 · 王者档', RANK_D3: '前 3 名 · 传说档', RANK_D10: '前 10 名 · 精英档', RANK_N: '参榜 · 慰劳档' },
     giftReward: t => `${t.gems} 钻 + ${t.credits.toLocaleString('en-US')} 金币`,
     giftClaimBtn: '生成奖励码',
+    syncBtn: '复制回游戏（全服榜+奖励一键回传）', syncOk: '已复制回传数据，回游戏粘贴即同步', syncNone: '先上榜再回传（暂无可同步数据）',
     giftCopyBig: '复制奖励码回游戏', giftCopySub: '回游戏自动识别领奖',
     giftCopied: '已复制 · 回游戏自动识别领奖',
     giftHint: '复制后回游戏自动识别兑换 · 与本次上榜绑定',
@@ -973,6 +975,7 @@ const I18N = {
     tierName: { RANK_D1: '1位 · 王者', RANK_D3: '3位以内 · 伝説', RANK_D10: '10位以内 · エリート', RANK_N: '参加 · 慰労' },
     giftReward: t => `${t.gems} ジェム + ${t.credits.toLocaleString('en-US')} ゴールド`,
     giftClaimBtn: '報酬コード生成',
+    syncBtn: 'ゲームへ戻す（全榜+報酬ワンタップ同期）', syncOk: '同期データをコピーしました。ゲームに貼って同期', syncNone: 'まず上榜してください（同期データなし）',
     giftCopyBig: 'コードをコピーしてゲームへ', giftCopySub: 'ゲーム内で自動認識',
     giftCopied: 'コピー済 · ゲームで自動認識',
     giftHint: 'コピー後ゲームで自動認識 · 今回の登録と紐付け',
@@ -1047,6 +1050,7 @@ const I18N = {
     tierName: { RANK_D1: '#1 · King Tier', RANK_D3: 'Top 3 · Legend', RANK_D10: 'Top 10 · Elite', RANK_N: 'Entry · Consolation' },
     giftReward: t => `${t.gems} Gems + ${t.credits.toLocaleString('en-US')} Credits`,
     giftClaimBtn: 'Generate Code',
+    syncBtn: 'Copy back to game (board + rewards sync)', syncOk: 'Sync data copied — paste it in game', syncNone: 'Upload first (nothing to sync yet)',
     giftCopyBig: 'Copy Code Back to Game', giftCopySub: 'Auto-detected in game',
     giftCopied: 'Copied · auto-detected in game',
     giftHint: 'Copy & return to game · auto-detected · bound to this upload',
@@ -1216,6 +1220,12 @@ function b64urlDecode(s) {
   const bin = atob(b64 + pad);
   const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
   return new TextDecoder('utf-8').decode(bytes);
+}
+function b64urlEncode(s) {
+  const bytes = new TextEncoder().encode(s);
+  let bin = '';
+  bytes.forEach(c => { bin += String.fromCharCode(c); });
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 function verifyRankCode(raw) {
   const code = String(raw || '').trim().replace(/\s+/g, '');
@@ -1949,6 +1959,7 @@ function applyI18n() {
   $('#uiLive').textContent = ONLINE ? t('liveOnline') : t('live');
   $('#codeInput').placeholder = t('codePh');
   $('#codeBtn').textContent = t('codeBtn');
+  $('#syncBtn').textContent = t('syncBtn');
   $('#uiGiftTitle').textContent = t('giftTitle');
   document.querySelector('[data-tt="tabPower"]').textContent = t('tabPower');
   document.querySelector('[data-tt="tabBoss"]').textContent = t('tabBoss');
@@ -2054,6 +2065,64 @@ $('#codeBtn').addEventListener('click', async () => {
   OPEN_KEY = v.data.slotId; // 自动展开"我"的条目，明确看到已上榜
   renderMe(); renderGift(); renderBoard();
 });
+
+/* ─── v6.x NQCRANKIN 数据信封：全服榜+昨日+大战+全部待领奖 一次复制回游戏 ─── */
+function slimEntry(e) {
+  return { slotId: e.slotId, name: e.name, title: e.title ?? null, power: e.power || 0,
+    party: (e.party || []).slice(0, 3).map(c => ({ charId: c.charId, name: c.name, level: c.level, stars: c.stars, power: c.power })),
+    megaCount: e.megaCount || 0, maxEnhance: e.maxEnhance || 0, credits: e.credits || 0, gems: e.gems || 0,
+    playerLevel: e.playerLevel || 0, playerRank: e.playerRank || 0, portraitCount: e.portraitCount || 0,
+    abyssFloor: e.abyssFloor || 0, caixiaoniao: e.caixiaoniao ? 1 : 0, worldWarWins: e.worldWarWins || 0,
+    rank: e.rank || e._rank || 0 };
+}
+async function buildSyncEnvelope() {
+  const top = REAL.slice().sort((a, b) => (b.power || 0) - (a.power || 0)).slice(0, 20).map(slimEntry);
+  const mySlots = Object.keys(loadEntries());
+  const me = mySlots.map(sid => REAL.find(e => e.slotId === sid)).filter(Boolean)
+    .sort((a, b) => (b.power || 0) - (a.power || 0))[0] || null;
+  const y = ydayData();
+  const yday = (y.entries || []).slice().sort((a, b) => (b.power || 0) - (a.power || 0)).slice(0, 10).map(slimEntry);
+  let war = null;
+  if (WAR && !WAR.pending) {
+    war = { date: WAR.date || '',
+      champion: WAR.champion ? { slotId: WAR.champion.slotId, name: WAR.champion.name, kills: WAR.champion.kills | 0 } : null,
+      standings: (WAR.standings || []).slice(0, 10).map(s => ({ slotId: s.slotId, name: s.name, rank: s.rank, kills: s.kills | 0 })) };
+  }
+  const rewards = [];
+  if (me) {
+    // 每日礼包：本 ts 已领 → 嵌入已发码；未领 → 服务器签发并嵌入（本按钮即领取动作；409=已签但本地无码则跳过）
+    const claimed = (loadClaimed()[me.slotId] || []).find(r => r.ts === me.ts);
+    if (claimed && claimed.code) rewards.push(claimed.code);
+    else if (!claimed && ONLINE) {
+      try {
+        const j = await apiGet('/reward?slot=' + encodeURIComponent(me.slotId));
+        const all = loadClaimed();
+        (all[me.slotId] = all[me.slotId] || []).push({ ts: me.ts, code: j.code });
+        saveClaimed(all);
+        rewards.push(j.code);
+      } catch (e) { /* 409 等：跳过不入信封 */ }
+    }
+    // 昨日榜结算（本地同口径签发）
+    const yd = mySlots.map(sid => ydayRewardFor(sid)).filter(Boolean).sort((a, b) => a.rank - b.rank)[0];
+    if (yd) rewards.push(yd.code);
+    // 世界大战冠军（我是冠军才签）
+    if (WAR && !WAR.pending && WAR.champion && mySlots.includes(WAR.champion.slotId)) {
+      try { rewards.push(wwChampionCode(WAR, WAR.champion.slotId)); } catch (e) { /* 静默 */ }
+    }
+  }
+  const payload = { v: 1, ts: Date.now(), me: me ? slimEntry(me) : null, top, yday, war, rewards };
+  const b64 = b64urlEncode(JSON.stringify(payload));
+  return `NQCRANKIN-${b64}-${sign16('NQCRANKIN' + b64)}`;
+}
+$('#syncBtn').addEventListener('click', async () => {
+  if (!REAL.length && !Object.keys(loadEntries()).length) { toast(t('syncNone')); return; }
+  $('#syncBtn').disabled = true;
+  try {
+    const code = await buildSyncEnvelope();
+    await copyText(code, t('syncOk'));
+    renderGift(); // 礼包可能刚被签发 → 刷新已领视图
+  } finally { $('#syncBtn').disabled = false; }
+});
 /* 礼包悬浮卡开合 */
 const sheet = $('#giftSheet'), mask = $('#sheetMask');
 function openSheet() { renderGift(); sheet.classList.add('open'); mask.classList.add('open'); }
@@ -2086,6 +2155,16 @@ mask.addEventListener('click', closeSheet);
   } else {
     maybeSnapLocal(Object.values(loadEntries()));
   }
+  // v6.x 网址带码自动上榜：游戏内「打开网页」携带 #code=NQCRANK-... → 免粘贴自动填充并提交
+  try {
+    const h = new URLSearchParams(location.hash.slice(1));
+    const hc = h.get('code');
+    if (hc && /^NQCRANK-/.test(hc)) {
+      history.replaceState(null, '', location.pathname + location.search); // 清除 hash 防刷新重复提交
+      $('#codeInput').value = hc;
+      $('#codeBtn').click();
+    }
+  } catch { /* 静默 */ }
 })();
 
 /** 离线提示（v8）：打开页面即弹出提醒需海外网络环境；榜单数据加载成功则自动关闭，加载不出保持显示可手动重试 */
